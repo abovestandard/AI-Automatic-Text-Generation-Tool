@@ -49,7 +49,13 @@ export function parseJsonResponse(text: string): Record<string, string> {
   const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(parsed)) {
-    result[key] = value === null || value === undefined ? '' : String(value);
+    if (value === null || value === undefined) {
+      result[key] = '';
+    } else if (typeof value === 'object') {
+      result[key] = JSON.stringify(value);
+    } else {
+      result[key] = String(value);
+    }
   }
   return result;
 }

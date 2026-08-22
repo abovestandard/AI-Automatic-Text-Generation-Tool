@@ -275,6 +275,19 @@
         });
     }
 
+    function formatPreviewValue(value) {
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'object') {
+            try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+        }
+        const str = String(value);
+        const trimmed = str.trim();
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+            try { return JSON.stringify(JSON.parse(trimmed), null, 2); } catch (e) { return str; }
+        }
+        return str;
+    }
+
     function showPreview($panel, response) {
         const $preview = $panel.find('.aica-preview');
         const $content = $panel.find('.aica-preview-content');
@@ -282,10 +295,11 @@
 
         const generated = response.result.generatedContent || {};
         for (const [key, value] of Object.entries(generated)) {
+            const display = formatPreviewValue(value);
             $content.append(
                 `<div class="aica-preview-field">
                     <strong>${escapeHtml(key)}</strong>
-                    <div class="aica-preview-value">${escapeHtml(String(value).substring(0, 500))}${String(value).length > 500 ? '...' : ''}</div>
+                    <div class="aica-preview-value">${escapeHtml(display.substring(0, 2000))}${display.length > 2000 ? '...' : ''}</div>
                 </div>`
             );
         }
@@ -512,10 +526,11 @@
 
         const generated = response.result.generatedContent || {};
         for (const [key, value] of Object.entries(generated)) {
+            const display = formatPreviewValue(value);
             $content.append(
                 `<div class="aica-preview-field">
                     <strong>${escapeHtml(key)}</strong>
-                    <div class="aica-preview-value">${escapeHtml(String(value).substring(0, 800))}${String(value).length > 800 ? '...' : ''}</div>
+                    <div class="aica-preview-value">${escapeHtml(display.substring(0, 3000))}${display.length > 3000 ? '...' : ''}</div>
                 </div>`
             );
         }
