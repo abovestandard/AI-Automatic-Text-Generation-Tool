@@ -17,7 +17,7 @@ export default function ModelSelect({ value, onChange, includeDefault, defaultLa
       setModels([
         { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai', supportsVision: true },
         { id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai', supportsVision: true },
-        { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'google', supportsVision: true, freeTier: true },
+        { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', provider: 'google', supportsVision: true, freeTier: true },
       ]);
     });
   }, []);

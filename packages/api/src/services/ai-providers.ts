@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getModelProvider } from '@ai-content/core';
+import { getModelProvider, resolveModelId } from '@ai-content/core';
 
 export interface AICompletionRequest {
   model: string;
@@ -82,7 +82,7 @@ async function completeGemini(request: AICompletionRequest): Promise<AICompletio
   }
 
   const model = genAI.getGenerativeModel({
-    model: request.model,
+    model: resolveModelId(request.model),
     systemInstruction: request.systemPrompt,
     generationConfig,
   });

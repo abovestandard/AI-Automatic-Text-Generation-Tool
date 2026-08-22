@@ -3,6 +3,7 @@ import {
   renderTemplate,
   parseJsonResponse,
   mapGeneratedContent,
+  resolveModelId,
 } from '@ai-content/core';
 import type {
   GenerationRequest,
@@ -76,7 +77,7 @@ export async function generateContent(
   }
 
   const prompt = rowToPrompt(promptRow);
-  const model = prompt.model || projectRow.default_model || 'gpt-4o-mini';
+  const model = resolveModelId(prompt.model || projectRow.default_model || 'gemini-3.6-flash');
 
   const renderedUserPrompt = renderTemplate(prompt.userPromptTemplate, request.sourceData);
   const schemaInstruction = buildOutputSchemaInstruction(prompt.outputFields);

@@ -35,7 +35,7 @@ apiRouter.post('/projects', (req: Request, res: Response) => {
   db.prepare(`
     INSERT INTO projects (id, name, description, wordpress_url, wordpress_api_key, openai_api_key, gemini_api_key, default_model, default_language, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, description || null, wordpressUrl || null, wordpressApiKey || null, openaiApiKey || null, geminiApiKey || null, defaultModel || 'gpt-4o-mini', defaultLanguage || 'en', now, now);
+  `).run(id, name, description || null, wordpressUrl || null, wordpressApiKey || null, openaiApiKey || null, geminiApiKey || null, defaultModel || 'gemini-3.6-flash', defaultLanguage || 'en', now, now);
 
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
   res.status(201).json(formatProject(row));

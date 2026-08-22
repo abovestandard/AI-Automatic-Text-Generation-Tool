@@ -7,6 +7,15 @@ export interface AIModel {
   freeTier?: boolean;
 }
 
+/** Maps deprecated model IDs to their current replacements. */
+export const DEPRECATED_MODEL_MAP: Record<string, string> = {
+  'gemini-2.0-flash': 'gemini-3.6-flash',
+  'gemini-2.0-flash-lite': 'gemini-3.5-flash-lite',
+  'gemini-1.5-flash': 'gemini-3.6-flash',
+  'gemini-1.5-flash-8b': 'gemini-3.5-flash-lite',
+  'gemini-1.5-pro': 'gemini-3.6-flash',
+};
+
 export const AI_MODELS: AIModel[] = [
   // OpenAI
   { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai', supportsVision: true, description: 'Best overall quality' },
@@ -18,26 +27,30 @@ export const AI_MODELS: AIModel[] = [
   { id: 'o1-mini', label: 'o1 Mini', provider: 'openai', supportsVision: false },
   { id: 'o3-mini', label: 'o3 Mini', provider: 'openai', supportsVision: false, description: 'Latest reasoning model' },
   // Google Gemini (free tier available)
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'google', supportsVision: true, freeTier: true, description: 'Free tier – fast, multimodal' },
-  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite', provider: 'google', supportsVision: true, freeTier: true, description: 'Free tier – lightweight' },
-  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', provider: 'google', supportsVision: true, freeTier: true, description: 'Free tier – reliable' },
-  { id: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash 8B', provider: 'google', supportsVision: true, freeTier: true },
-  { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', provider: 'google', supportsVision: true, description: 'Higher quality Gemini' },
+  { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', provider: 'google', supportsVision: true, freeTier: true, description: 'Recommended – fast, multimodal, free tier' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', provider: 'google', supportsVision: true, freeTier: true, description: 'Free tier – fastest, lowest cost' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', supportsVision: true, freeTier: true, description: 'Free tier – balanced' },
 ];
 
+export function resolveModelId(modelId: string): string {
+  return DEPRECATED_MODEL_MAP[modelId] || modelId;
+}
+
 export function getModelProvider(modelId: string): 'openai' | 'google' {
-  const model = AI_MODELS.find((m) => m.id === modelId);
+  const resolved = resolveModelId(modelId);
+  const model = AI_MODELS.find((m) => m.id === resolved);
   if (model) return model.provider;
-  if (modelId.startsWith('gemini-')) return 'google';
+  if (resolved.startsWith('gemini-')) return 'google';
   return 'openai';
 }
 
 export function getModelInfo(modelId: string): AIModel | undefined {
-  return AI_MODELS.find((m) => m.id === modelId);
+  return AI_MODELS.find((m) => m.id === resolveModelId(modelId));
 }
 
 export function modelSupportsVision(modelId: string): boolean {
   const info = getModelInfo(modelId);
   if (info) return info.supportsVision;
-  return modelId.startsWith('gemini-') || modelId.includes('4o') || modelId.includes('turbo');
+  const resolved = resolveModelId(modelId);
+  return resolved.startsWith('gemini-') || resolved.includes('4o') || resolved.includes('turbo');
 }
