@@ -248,6 +248,198 @@
             });
     }
 
+    // ─── Shared Helpers ─────────────────────────────────────
+
+    function parseContentType(value) {
+        if (!value || value.indexOf(':') === -1) return null;
+        const parts = value.split(':');
+        return { kind: parts[0], slug: parts[1] };
+    }
+
+    function getItemTypeFromKind(kind) {
+        return kind === 'taxonomy' ? 'term' : 'post';
+    }
+
+    function loadItemsForType(contentType, $select, placeholder) {
+        const parsed = parseContentType(contentType);
+        if (!parsed) {
+            $select.prop('disabled', true).empty()
+                .append(`<option value="">${escapeHtml(placeholder || 'Select a content type first...')}</option>`);
+            return Promise.resolve([]);
+        }
+
+        $select.prop('disabled', true).empty()
+            .append('<option value="">Loading...</option>');
+
+        return wp.apiFetch({
+            path: `/ai-content/v1/items?type=${encodeURIComponent(parsed.kind)}&slug=${encodeURIComponent(parsed.slug)}`,
+        }).then(function (items) {
+            $select.empty().append(`<option value="">${escapeHtml(placeholder || 'Select an item...')}</option>`);
+            (items || []).forEach(function (item) {
+                $select.append(
+                    `<option value="${item.id}" data-edit-url="${escapeHtml(item.editUrl || '')}" data-label="${escapeHtml(item.label)}">${escapeHtml(item.label)}</option>`
+                );
+            });
+            $select.prop('disabled', false);
+            return items || [];
+        }).catch(function (err) {
+            $select.empty().append(`<option value="">${escapeHtml(err.message || 'Failed to load items')}</option>`);
+            return [];
+        });
+    }
+
+    // ─── Single Item Generate Page ──────────────────────────
+
+    let generateResult = null;
+
+    function initGeneratePage() {
+        const $page = $('.aica-generate-page');
+        if (!$page.length) return;
+
+        const $contentType = $('#aica-content-type');
+        const $contentItem = $('#aica-content-item');
+        const $generateBtn = $('#aica-generate-start');
+        const $editLink = $('#aica-edit-item-link');
+
+        loadPrompts($('#aica-generate-prompt'));
+
+        $contentType.on('change', function () {
+            const type = $(this).val();
+            $generateBtn.prop('disabled', true);
+            $editLink.hide();
+            $('#aica-generate-preview').hide();
+            generateResult = null;
+
+            loadItemsForType(type, $contentItem, 'Select an item...').then(function (items) {
+                $('#aica-item-count').text(items.length ? `${items.length} items available` : 'No items found');
+            });
+        });
+
+        $contentItem.on('change', function () {
+            const hasItem = !!$(this).val();
+            $generateBtn.prop('disabled', !hasItem);
+            const editUrl = $(this).find(':selected').data('edit-url');
+            if (editUrl) {
+                $editLink.attr('href', editUrl).show();
+            } else {
+                $editLink.hide();
+            }
+        });
+
+        $generateBtn.on('click', function () {
+            const contentType = $contentType.val();
+            const parsed = parseContentType(contentType);
+            const itemId = parseInt($contentItem.val(), 10);
+            const promptId = $('#aica-generate-prompt').val();
+            const applyMode = $('#aica-generate-apply-mode').val();
+
+            if (!parsed || !itemId || !promptId) {
+                alert('Please select a content type, item, and prompt.');
+                return;
+            }
+
+            const itemType = getItemTypeFromKind(parsed.kind);
+            const taxonomy = parsed.kind === 'taxonomy' ? parsed.slug : '';
+
+            $('#aica-generate-status').show().find('.aica-status-text').text(config.strings.generating);
+            $('#aica-generate-preview').hide();
+            $generateBtn.prop('disabled', true);
+
+            wp.apiFetch({
+                path: '/ai-content/v1/generate',
+                method: 'POST',
+                data: { itemType, itemId, taxonomy, promptId, applyMode },
+            }).then(function (response) {
+                $('#aica-generate-status').hide();
+                $generateBtn.prop('disabled', false);
+
+                if (response.result && response.result.status === 'success') {
+                    generateResult = {
+                        response,
+                        itemType,
+                        itemId,
+                        taxonomy,
+                        applyMode,
+                    };
+                    showGeneratePreview(response);
+                } else {
+                    alert(response.result?.error || config.strings.error);
+                }
+            }).catch(function (err) {
+                $('#aica-generate-status').hide();
+                $generateBtn.prop('disabled', false);
+                alert(err.message || config.strings.error);
+            });
+        });
+
+        $('#aica-generate-save').on('click', function () {
+            if (!generateResult) return;
+
+            const mappedFields = generateResult.response.result.mappedFields || [];
+            if (!mappedFields.length) {
+                alert('No mapped fields to save.');
+                return;
+            }
+
+            $(this).prop('disabled', true).text('Saving...');
+
+            wp.apiFetch({
+                path: '/ai-content/v1/save-content',
+                method: 'POST',
+                data: {
+                    itemType: generateResult.itemType,
+                    itemId: generateResult.itemId,
+                    taxonomy: generateResult.taxonomy,
+                    applyMode: generateResult.applyMode,
+                    mappedFields,
+                },
+            }).then(function (result) {
+                $('#aica-generate-save').prop('disabled', false).text('Save to WordPress');
+                alert(`Saved ${result.saved} of ${result.total} fields successfully.`);
+                $('#aica-generate-preview').hide();
+                generateResult = null;
+            }).catch(function (err) {
+                $('#aica-generate-save').prop('disabled', false).text('Save to WordPress');
+                alert('Save failed: ' + (err.message || 'Unknown error'));
+            });
+        });
+
+        $('#aica-generate-cancel').on('click', function () {
+            $('#aica-generate-preview').hide();
+            generateResult = null;
+        });
+    }
+
+    function showGeneratePreview(response) {
+        const $preview = $('#aica-generate-preview');
+        const $content = $('#aica-generate-preview-content');
+        $content.empty();
+
+        const generated = response.result.generatedContent || {};
+        for (const [key, value] of Object.entries(generated)) {
+            $content.append(
+                `<div class="aica-preview-field">
+                    <strong>${escapeHtml(key)}</strong>
+                    <div class="aica-preview-value">${escapeHtml(String(value).substring(0, 800))}${String(value).length > 800 ? '...' : ''}</div>
+                </div>`
+            );
+        }
+
+        const mapped = response.result.mappedFields || [];
+        if (mapped.length > 0) {
+            $content.append('<h3>Field Mapping</h3>');
+            for (const field of mapped) {
+                $content.append(
+                    `<div class="aica-mapping-row">
+                        <span>${escapeHtml(field.aiOutputKey)} → ${escapeHtml(field.targetField)} (${escapeHtml(field.targetType)})</span>
+                    </div>`
+                );
+            }
+        }
+
+        $preview.show();
+    }
+
     // ─── Bulk Processing ────────────────────────────────────
 
     function initBulkPage() {
@@ -258,6 +450,10 @@
 
         $('#aica-bulk-load-items').on('click', function () {
             const contentType = $('#aica-bulk-content-type').val();
+            if (!contentType) {
+                alert('Please select a content type.');
+                return;
+            }
             loadBulkItems(contentType);
         });
 
@@ -274,42 +470,37 @@
 
     function loadBulkItems(contentType) {
         const $tbody = $('#aica-bulk-items-tbody');
-        $tbody.empty();
+        const parsed = parseContentType(contentType);
+        $tbody.empty().append('<tr><td colspan="3">Loading...</td></tr>');
 
-        let taxonomy = 'category';
-        let postType = 'post';
-        if (contentType === 'product') postType = 'product';
-
-        const items = getLocalItems(contentType);
-
-        items.forEach(function (item) {
-            $tbody.append(
-                `<tr>
-                    <td><input type="checkbox" value="${item.id}" data-label="${escapeHtml(item.name)}" data-type="${item.type}" data-taxonomy="${item.taxonomy || ''}" /></td>
-                    <td>${escapeHtml(item.name)}</td>
-                    <td>${escapeHtml(item.status || '')}</td>
-                </tr>`
-            );
-        });
-
-        $('#aica-bulk-items-list').show();
-        updateBulkStartButton();
-    }
-
-    function getLocalItems(contentType) {
-        const items = [];
-        if (contentType === 'category') {
-            $('table.wp-list-table tbody tr').each(function () {
-                const $row = $(this);
-                const name = $row.find('.row-title, td strong a, td.column-name a').first().text().trim();
-                const editLink = $row.find('a.row-title, td strong a, td.column-name a').first().attr('href') || '';
-                const idMatch = editLink.match(/tag_ID=(\d+)/) || editLink.match(/term_id=(\d+)/);
-                if (idMatch && name) {
-                    items.push({ id: idMatch[1], name, type: 'term', taxonomy: 'category' });
-                }
+        wp.apiFetch({
+            path: `/ai-content/v1/bulk/items?contentType=${encodeURIComponent(contentType)}`,
+        }).then(function (items) {
+            $tbody.empty();
+            (items || []).forEach(function (item) {
+                $tbody.append(
+                    `<tr>
+                        <td><input type="checkbox" value="${item.itemId}"
+                            data-label="${escapeHtml(item.itemLabel)}"
+                            data-type="${item.itemType}"
+                            data-taxonomy="${escapeHtml(item.taxonomy || '')}"
+                            data-post-type="${escapeHtml(item.postType || '')}" /></td>
+                        <td>${escapeHtml(item.itemLabel)}</td>
+                        <td>${escapeHtml(item.status || '')}</td>
+                    </tr>`
+                );
             });
-        }
-        return items;
+
+            if (!items || items.length === 0) {
+                $tbody.append('<tr><td colspan="3">No items found for this content type.</td></tr>');
+            }
+
+            $('#aica-bulk-items-list').show();
+            updateBulkStartButton();
+        }).catch(function (err) {
+            $tbody.empty().append(`<tr><td colspan="3">${escapeHtml(err.message || 'Failed to load items')}</td></tr>`);
+            $('#aica-bulk-items-list').show();
+        });
     }
 
     function updateBulkStartButton() {
@@ -424,6 +615,7 @@
         $('.aica-generation-panel').each(function () {
             initGenerationPanel($(this));
         });
+        initGeneratePage();
         initBulkPage();
         initConnectionTest();
     });

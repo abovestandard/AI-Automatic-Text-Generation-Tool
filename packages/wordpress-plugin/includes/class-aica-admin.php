@@ -19,6 +19,14 @@ class AICA_Admin {
         add_action('edited_category', [$this, 'save_term_meta']);
         add_filter('manage_edit-category_columns', [$this, 'add_bulk_column']);
         add_filter('manage_category_custom_column', [$this, 'render_bulk_column'], 10, 3);
+
+        $taxonomies = get_taxonomies(['public' => true], 'names');
+        foreach ($taxonomies as $taxonomy) {
+            if ($taxonomy === 'category') {
+                continue;
+            }
+            add_action("{$taxonomy}_edit_form_fields", [$this, 'add_term_generation_panel'], 10, 1);
+        }
     }
 
     public function add_admin_menu(): void {
@@ -30,6 +38,15 @@ class AICA_Admin {
             [$this, 'render_dashboard'],
             'dashicons-superhero-alt',
             30
+        );
+
+        add_submenu_page(
+            'ai-content-automation',
+            __('Generate Content', 'ai-content-automation'),
+            __('Generate Content', 'ai-content-automation'),
+            'edit_posts',
+            'ai-content-generate',
+            [$this, 'render_generate_page']
         );
 
         add_submenu_page(
@@ -138,7 +155,7 @@ class AICA_Admin {
                     <ol>
                         <li><?php esc_html_e('Configure the platform API URL and Project ID in Settings.', 'ai-content-automation'); ?></li>
                         <li><?php esc_html_e('Create prompts and field mappings in the platform dashboard.', 'ai-content-automation'); ?></li>
-                        <li><?php esc_html_e('Open any post or category to generate content.', 'ai-content-automation'); ?></li>
+                        <li><?php esc_html_e('Use Generate Content to create text for a specific post or category.', 'ai-content-automation'); ?></li>
                         <li><?php esc_html_e('Use Bulk Generation for processing multiple items.', 'ai-content-automation'); ?></li>
                     </ol>
                 </div>
@@ -156,41 +173,152 @@ class AICA_Admin {
         <?php
     }
 
-    public function render_bulk_page(): void {
+    public function render_generate_page(): void {
+        $this->render_config_notice();
+        $content_types = AICA_Content_Registry::get_content_types();
+        ?>
+        <div class="wrap aica-generate-page">
+            <h1><?php esc_html_e('Generate AI Content', 'ai-content-automation'); ?></h1>
+            <p class="description"><?php esc_html_e('Select a post type or taxonomy, choose a specific item, generate content, and save it directly to WordPress fields.', 'ai-content-automation'); ?></p>
+
+            <div class="aica-generate-config card-like">
+                <div class="aica-field">
+                    <label for="aica-content-type"><?php esc_html_e('Content Type', 'ai-content-automation'); ?></label>
+                    <select id="aica-content-type">
+                        <option value=""><?php esc_html_e('Select post type or taxonomy...', 'ai-content-automation'); ?></option>
+                        <?php if (!empty($content_types['postTypes'])) : ?>
+                            <optgroup label="<?php esc_attr_e('Post Types', 'ai-content-automation'); ?>">
+                                <?php foreach ($content_types['postTypes'] as $pt) : ?>
+                                    <option value="post_type:<?php echo esc_attr($pt['slug']); ?>">
+                                        <?php echo esc_html($pt['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        <?php endif; ?>
+                        <?php if (!empty($content_types['taxonomies'])) : ?>
+                            <optgroup label="<?php esc_attr_e('Taxonomies', 'ai-content-automation'); ?>">
+                                <?php foreach ($content_types['taxonomies'] as $tax) : ?>
+                                    <option value="taxonomy:<?php echo esc_attr($tax['slug']); ?>">
+                                        <?php echo esc_html($tax['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        <?php endif; ?>
+                    </select>
+                </div>
+
+                <div class="aica-field">
+                    <label for="aica-content-item"><?php esc_html_e('Select Item', 'ai-content-automation'); ?></label>
+                    <select id="aica-content-item" disabled>
+                        <option value=""><?php esc_html_e('Select a content type first...', 'ai-content-automation'); ?></option>
+                    </select>
+                    <p class="aica-field-hint" id="aica-item-count"></p>
+                </div>
+
+                <div class="aica-field">
+                    <label for="aica-generate-prompt"><?php esc_html_e('Select Prompt', 'ai-content-automation'); ?></label>
+                    <select id="aica-generate-prompt">
+                        <option value=""><?php esc_html_e('Loading prompts...', 'ai-content-automation'); ?></option>
+                    </select>
+                </div>
+
+                <div class="aica-field">
+                    <label for="aica-generate-apply-mode"><?php esc_html_e('Apply Mode', 'ai-content-automation'); ?></label>
+                    <select id="aica-generate-apply-mode">
+                        <option value="preview"><?php esc_html_e('Generate & Preview', 'ai-content-automation'); ?></option>
+                        <option value="empty_only"><?php esc_html_e('Fill Empty Fields Only', 'ai-content-automation'); ?></option>
+                        <option value="replace"><?php esc_html_e('Replace Existing Content', 'ai-content-automation'); ?></option>
+                    </select>
+                </div>
+
+                <div class="aica-actions">
+                    <button type="button" class="button button-primary" id="aica-generate-start" disabled>
+                        <?php esc_html_e('Generate Content', 'ai-content-automation'); ?>
+                    </button>
+                    <a href="#" class="button" id="aica-edit-item-link" style="display:none;" target="_blank">
+                        <?php esc_html_e('Edit Item in WordPress', 'ai-content-automation'); ?>
+                    </a>
+                </div>
+            </div>
+
+            <div id="aica-generate-status" class="aica-status" style="display:none;">
+                <div class="aica-spinner"></div>
+                <span class="aica-status-text"></span>
+            </div>
+
+            <div id="aica-generate-preview" class="aica-preview card-like" style="display:none;">
+                <h2><?php esc_html_e('Generated Content Preview', 'ai-content-automation'); ?></h2>
+                <div id="aica-generate-preview-content"></div>
+                <div class="aica-preview-actions">
+                    <button type="button" class="button button-primary" id="aica-generate-save">
+                        <?php esc_html_e('Save to WordPress', 'ai-content-automation'); ?>
+                    </button>
+                    <button type="button" class="button" id="aica-generate-cancel">
+                        <?php esc_html_e('Discard', 'ai-content-automation'); ?>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    private function render_config_notice(): void {
         $api_url    = AICA_Settings::get('api_url', '');
         $project_id = AICA_Settings::get('project_id', '');
+
+        if (empty($project_id)) : ?>
+            <div class="notice notice-warning">
+                <p>
+                    <?php esc_html_e('Platform is not configured yet.', 'ai-content-automation'); ?>
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=ai-content-settings')); ?>">
+                        <?php esc_html_e('Go to Settings', 'ai-content-automation'); ?>
+                    </a>
+                    <?php esc_html_e('and enter your API URL and Project ID.', 'ai-content-automation'); ?>
+                </p>
+            </div>
+        <?php elseif (empty($api_url)) : ?>
+            <div class="notice notice-warning">
+                <p>
+                    <?php esc_html_e('API URL is not configured.', 'ai-content-automation'); ?>
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=ai-content-settings')); ?>">
+                        <?php esc_html_e('Go to Settings', 'ai-content-automation'); ?>
+                    </a>
+                </p>
+            </div>
+        <?php endif;
+    }
+
+    public function render_bulk_page(): void {
+        $content_types = AICA_Content_Registry::get_content_types();
         ?>
         <div class="wrap aica-bulk-page">
             <h1><?php esc_html_e('Bulk AI Content Generation', 'ai-content-automation'); ?></h1>
 
-            <?php if (empty($project_id)) : ?>
-                <div class="notice notice-warning">
-                    <p>
-                        <?php esc_html_e('Platform is not configured yet.', 'ai-content-automation'); ?>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=ai-content-settings')); ?>">
-                            <?php esc_html_e('Go to Settings', 'ai-content-automation'); ?>
-                        </a>
-                        <?php esc_html_e('and enter your API URL and Project ID.', 'ai-content-automation'); ?>
-                    </p>
-                </div>
-            <?php elseif (empty($api_url)) : ?>
-                <div class="notice notice-warning">
-                    <p>
-                        <?php esc_html_e('API URL is not configured.', 'ai-content-automation'); ?>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=ai-content-settings')); ?>">
-                            <?php esc_html_e('Go to Settings', 'ai-content-automation'); ?>
-                        </a>
-                    </p>
-                </div>
-            <?php endif; ?>
+            <?php $this->render_config_notice(); ?>
 
             <div class="aica-bulk-config">
                 <div class="aica-field">
-                    <label><?php esc_html_e('Content Type', 'ai-content-automation'); ?></label>
+                    <label for="aica-bulk-content-type"><?php esc_html_e('Content Type', 'ai-content-automation'); ?></label>
                     <select id="aica-bulk-content-type">
-                        <option value="category"><?php esc_html_e('Categories', 'ai-content-automation'); ?></option>
-                        <option value="post"><?php esc_html_e('Posts', 'ai-content-automation'); ?></option>
-                        <option value="product"><?php esc_html_e('Products (WooCommerce)', 'ai-content-automation'); ?></option>
+                        <option value=""><?php esc_html_e('Select post type or taxonomy...', 'ai-content-automation'); ?></option>
+                        <?php if (!empty($content_types['postTypes'])) : ?>
+                            <optgroup label="<?php esc_attr_e('Post Types', 'ai-content-automation'); ?>">
+                                <?php foreach ($content_types['postTypes'] as $pt) : ?>
+                                    <option value="post_type:<?php echo esc_attr($pt['slug']); ?>">
+                                        <?php echo esc_html($pt['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        <?php endif; ?>
+                        <?php if (!empty($content_types['taxonomies'])) : ?>
+                            <optgroup label="<?php esc_attr_e('Taxonomies', 'ai-content-automation'); ?>">
+                                <?php foreach ($content_types['taxonomies'] as $tax) : ?>
+                                    <option value="taxonomy:<?php echo esc_attr($tax['slug']); ?>">
+                                        <?php echo esc_html($tax['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        <?php endif; ?>
                     </select>
                 </div>
 

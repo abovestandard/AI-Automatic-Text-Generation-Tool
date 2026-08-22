@@ -3,41 +3,31 @@ if (!defined('ABSPATH')) exit;
 
 class AICA_Bulk_Processor {
 
-    public static function get_categories(int $limit = 100): array {
-        $terms = get_terms([
-            'taxonomy'   => 'category',
-            'hide_empty' => false,
-            'number'     => $limit,
-        ]);
-
-        if (is_wp_error($terms)) {
+    public static function get_items_for_type(string $content_type, int $limit = 200): array {
+        $parsed = AICA_Content_Registry::parse_content_type($content_type);
+        if (!$parsed) {
             return [];
         }
 
-        return array_map(function ($term) {
+        $items = AICA_Content_Registry::get_items($parsed['kind'], $parsed['slug'], $limit);
+
+        return array_map(function ($item) use ($parsed) {
             return [
-                'itemId'    => $term->term_id,
-                'itemType'  => 'term',
-                'itemLabel' => $term->name,
-                'taxonomy'  => 'category',
+                'itemId'    => $item['id'],
+                'itemType'  => $parsed['kind'] === 'taxonomy' ? 'term' : 'post',
+                'itemLabel' => $item['label'],
+                'taxonomy'  => $parsed['kind'] === 'taxonomy' ? $parsed['slug'] : '',
+                'postType'  => $parsed['kind'] === 'post_type' ? $parsed['slug'] : '',
+                'status'    => $item['status'] ?? '',
             ];
-        }, $terms);
+        }, $items);
+    }
+
+    public static function get_categories(int $limit = 100): array {
+        return self::get_items_for_type('taxonomy:category', $limit);
     }
 
     public static function get_posts(string $post_type = 'post', int $limit = 100): array {
-        $posts = get_posts([
-            'post_type'      => $post_type,
-            'posts_per_page' => $limit,
-            'post_status'    => 'any',
-        ]);
-
-        return array_map(function ($post) {
-            return [
-                'itemId'    => $post->ID,
-                'itemType'  => 'post',
-                'itemLabel' => $post->post_title,
-                'postType'  => $post->post_type,
-            ];
-        }, $posts);
+        return self::get_items_for_type("post_type:{$post_type}", $limit);
     }
 }

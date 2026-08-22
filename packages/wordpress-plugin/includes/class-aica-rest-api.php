@@ -49,6 +49,15 @@ class AICA_REST_API {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route($namespace, '/bulk/items', [
+            'methods'             => 'GET',
+            'callback'            => [$this, 'get_bulk_items'],
+            'permission_callback' => [$this, 'check_permission'],
+            'args'                => [
+                'contentType' => ['required' => true, 'type' => 'string'],
+            ],
+        ]);
+
         register_rest_route($namespace, '/bulk/generate', [
             'methods'             => 'POST',
             'callback'            => [$this, 'bulk_generate'],
@@ -58,6 +67,29 @@ class AICA_REST_API {
         register_rest_route($namespace, '/bulk/status/(?P<job_id>[a-zA-Z0-9-]+)', [
             'methods'             => 'GET',
             'callback'            => [$this, 'bulk_status'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route($namespace, '/content-types', [
+            'methods'             => 'GET',
+            'callback'            => [$this, 'get_content_types'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
+        register_rest_route($namespace, '/items', [
+            'methods'             => 'GET',
+            'callback'            => [$this, 'get_items'],
+            'permission_callback' => [$this, 'check_permission'],
+            'args'                => [
+                'type' => ['required' => true, 'type' => 'string'],
+                'slug' => ['required' => true, 'type' => 'string'],
+                'search' => ['type' => 'string', 'default' => ''],
+            ],
+        ]);
+
+        register_rest_route($namespace, '/save-content', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'save_content'],
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
@@ -168,6 +200,12 @@ class AICA_REST_API {
         ]);
     }
 
+    public function get_bulk_items(WP_REST_Request $request): WP_REST_Response {
+        $content_type = sanitize_text_field($request->get_param('contentType'));
+        $items = AICA_Bulk_Processor::get_items_for_type($content_type);
+        return new WP_REST_Response($items);
+    }
+
     public function bulk_generate(WP_REST_Request $request): WP_REST_Response {
         $client = new AICA_API_Client();
         $params = $request->get_json_params();
@@ -212,6 +250,53 @@ class AICA_REST_API {
         $client = new AICA_API_Client();
         $job = $client->get_bulk_job($request->get_param('job_id'));
         return new WP_REST_Response($job);
+    }
+
+    public function save_content(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $item_type = sanitize_text_field($params['itemType'] ?? 'post');
+        $item_id   = (int) ($params['itemId'] ?? 0);
+        $taxonomy  = sanitize_text_field($params['taxonomy'] ?? '');
+        $apply_mode = sanitize_text_field($params['applyMode'] ?? 'replace');
+        $mapped_fields = $params['mappedFields'] ?? [];
+
+        if (!$item_id) {
+            return new WP_REST_Response(['error' => 'Item ID is required'], 400);
+        }
+
+        $results = AICA_Content_Saver::save_mapped_fields(
+            $item_type,
+            $item_id,
+            $taxonomy,
+            $mapped_fields,
+            $apply_mode
+        );
+
+        $saved = count(array_filter($results, fn($r) => !empty($r['saved'])));
+
+        return new WP_REST_Response([
+            'success' => true,
+            'saved'   => $saved,
+            'total'   => count($results),
+            'results' => $results,
+        ]);
+    }
+
+    public function get_content_types(): WP_REST_Response {
+        return new WP_REST_Response(AICA_Content_Registry::get_content_types());
+    }
+
+    public function get_items(WP_REST_Request $request): WP_REST_Response {
+        $type   = sanitize_text_field($request->get_param('type'));
+        $slug   = sanitize_key($request->get_param('slug'));
+        $search = sanitize_text_field($request->get_param('search') ?? '');
+
+        if (!in_array($type, ['post_type', 'taxonomy'], true)) {
+            return new WP_REST_Response(['error' => 'Invalid type'], 400);
+        }
+
+        $items = AICA_Content_Registry::get_items($type, $slug, 200, $search);
+        return new WP_REST_Response($items);
     }
 
     public function test_connection(): WP_REST_Response {
