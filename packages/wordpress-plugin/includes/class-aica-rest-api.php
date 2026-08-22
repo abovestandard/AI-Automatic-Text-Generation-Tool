@@ -93,6 +93,16 @@ class AICA_REST_API {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route($namespace, '/acf-fields', [
+            'methods'             => 'GET',
+            'callback'            => [$this, 'get_acf_fields'],
+            'permission_callback' => [$this, 'check_permission'],
+            'args'                => [
+                'type' => ['required' => true, 'type' => 'string'],
+                'slug' => ['required' => true, 'type' => 'string'],
+            ],
+        ]);
+
         register_rest_route($namespace, '/test-connection', [
             'methods'             => 'GET',
             'callback'            => [$this, 'test_connection'],
@@ -119,6 +129,21 @@ class AICA_REST_API {
         }
 
         $images = AICA_Data_Collector::collect_images($source_data);
+
+        // Include user-uploaded reference images
+        $uploaded = $params['uploadedImages'] ?? [];
+        if (is_array($uploaded)) {
+            foreach ($uploaded as $img) {
+                if (!empty($img['base64'])) {
+                    $images[] = [
+                        'key'      => sanitize_text_field($img['key'] ?? 'uploaded_image'),
+                        'url'      => '',
+                        'base64'   => $img['base64'],
+                        'mimeType' => sanitize_text_field($img['mimeType'] ?? 'image/jpeg'),
+                    ];
+                }
+            }
+        }
 
         $payload = [
             'promptId'   => sanitize_text_field($params['promptId'] ?? ''),
@@ -297,6 +322,21 @@ class AICA_REST_API {
 
         $items = AICA_Content_Registry::get_items($type, $slug, 200, $search);
         return new WP_REST_Response($items);
+    }
+
+    public function get_acf_fields(WP_REST_Request $request): WP_REST_Response {
+        $type = sanitize_text_field($request->get_param('type'));
+        $slug = sanitize_key($request->get_param('slug'));
+
+        if (!in_array($type, ['post_type', 'taxonomy'], true)) {
+            return new WP_REST_Response(['error' => 'Invalid type'], 400);
+        }
+
+        return new WP_REST_Response([
+            'available' => AICA_ACF_Helper::is_available(),
+            'tree'      => AICA_ACF_Helper::get_field_tree($type, $slug),
+            'flat'      => AICA_ACF_Helper::get_flat_fields($type, $slug),
+        ]);
     }
 
     public function test_connection(): WP_REST_Response {

@@ -7,6 +7,72 @@
 
     const config = window.aicaConfig || {};
     let currentResult = null;
+    let uploadedImage = null; // { base64, mimeType, previewUrl }
+
+    // ─── Image Upload Helper ────────────────────────────────
+
+    function initImageUpload($input, $preview, $previewImg, $removeBtn, onChange) {
+        if (!$input.length) return;
+
+        $input.on('change', function () {
+            const file = this.files && this.files[0];
+            if (!file) return;
+
+            if (!file.type.startsWith('image/')) {
+                alert('Please select an image file.');
+                this.value = '';
+                return;
+            }
+
+            if (file.size > 10 * 1024 * 1024) {
+                alert('Image must be smaller than 10 MB.');
+                this.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const dataUrl = e.target.result;
+                const base64 = dataUrl.split(',')[1];
+                uploadedImage = {
+                    base64,
+                    mimeType: file.type,
+                    previewUrl: dataUrl,
+                    key: 'uploaded_image',
+                };
+                if ($previewImg.length) $previewImg.attr('src', dataUrl);
+                if ($preview.length) $preview.show();
+                if (onChange) onChange(uploadedImage);
+            };
+            reader.readAsDataURL(file);
+        });
+
+        if ($removeBtn.length) {
+            $removeBtn.on('click', function () {
+                uploadedImage = null;
+                $input.val('');
+                if ($preview.length) $preview.hide();
+                if ($previewImg.length) $previewImg.attr('src', '');
+                if (onChange) onChange(null);
+            });
+        }
+    }
+
+    function getUploadedImages() {
+        if (!uploadedImage) return [];
+        return [{
+            key: uploadedImage.key,
+            base64: uploadedImage.base64,
+            mimeType: uploadedImage.mimeType,
+        }];
+    }
+
+    function resetUploadedImage($input, $preview, $previewImg) {
+        uploadedImage = null;
+        if ($input && $input.length) $input.val('');
+        if ($preview && $preview.length) $preview.hide();
+        if ($previewImg && $previewImg.length) $previewImg.attr('src', '');
+    }
 
     // ─── Field Filler Engine ────────────────────────────────
 
@@ -146,6 +212,13 @@
 
         loadPrompts($panel.find('.aica-prompt-select'));
 
+        initImageUpload(
+            $panel.find('.aica-panel-upload-image'),
+            $panel.find('.aica-panel-image-preview'),
+            $panel.find('.aica-panel-image-preview img'),
+            $panel.find('.aica-panel-image-remove')
+        );
+
         $panel.find('.aica-generate-btn').on('click', function () {
             const promptId = $panel.find('.aica-prompt-select').val();
             const applyMode = $panel.find('.aica-apply-mode').val();
@@ -163,7 +236,14 @@
             wp.apiFetch({
                 path: '/ai-content/v1/generate',
                 method: 'POST',
-                data: { itemType, itemId, taxonomy, promptId, applyMode },
+                data: {
+                    itemType,
+                    itemId,
+                    taxonomy,
+                    promptId,
+                    applyMode,
+                    uploadedImages: getUploadedImages(),
+                },
             }).then(function (response) {
                 currentResult = response;
                 $panel.find('.aica-status').hide();
@@ -301,6 +381,13 @@
         const $generateBtn = $('#aica-generate-start');
         const $editLink = $('#aica-edit-item-link');
 
+        initImageUpload(
+            $('#aica-upload-image'),
+            $('#aica-image-preview'),
+            $('#aica-image-preview-img'),
+            $('#aica-image-remove')
+        );
+
         loadPrompts($('#aica-generate-prompt'));
 
         $contentType.on('change', function () {
@@ -309,6 +396,7 @@
             $editLink.hide();
             $('#aica-generate-preview').hide();
             generateResult = null;
+            resetUploadedImage($('#aica-upload-image'), $('#aica-image-preview'), $('#aica-image-preview-img'));
 
             loadItemsForType(type, $contentItem, 'Select an item...').then(function (items) {
                 $('#aica-item-count').text(items.length ? `${items.length} items available` : 'No items found');
@@ -348,7 +436,14 @@
             wp.apiFetch({
                 path: '/ai-content/v1/generate',
                 method: 'POST',
-                data: { itemType, itemId, taxonomy, promptId, applyMode },
+                data: {
+                    itemType,
+                    itemId,
+                    taxonomy,
+                    promptId,
+                    applyMode,
+                    uploadedImages: getUploadedImages(),
+                },
             }).then(function (response) {
                 $('#aica-generate-status').hide();
                 $generateBtn.prop('disabled', false);
@@ -584,6 +679,64 @@
         });
     }
 
+    // ─── Prompts List Page ──────────────────────────────────
+
+    function initPromptsPage() {
+        const $page = $('.aica-prompts-page');
+        if (!$page.length) return;
+
+        const $loading = $('#aica-prompts-loading');
+        const $container = $('#aica-prompts-container');
+
+        wp.apiFetch({ path: '/ai-content/v1/prompts' })
+            .then(function (prompts) {
+                $loading.hide();
+
+                if (prompts && prompts.error) {
+                    $container.html(`<div class="aica-empty-state">${escapeHtml(prompts.error)}</div>`);
+                    return;
+                }
+
+                if (!prompts || prompts.length === 0) {
+                    $container.html(
+                        '<div class="aica-empty-state">No prompts found. Create prompts in the platform dashboard using the button above.</div>'
+                    );
+                    return;
+                }
+
+                const $grid = $('<div class="aica-prompts-grid"></div>');
+                prompts.forEach(function (p) {
+                    const badges = [];
+                    if (p.supportsVision) badges.push('<span class="aica-badge vision">Vision</span>');
+                    badges.push(`<span class="aica-badge">${(p.outputFields || []).length} fields</span>`);
+                    if (p.model) badges.push(`<span class="aica-badge">${escapeHtml(p.model)}</span>`);
+
+                    const fields = (p.outputFields || [])
+                        .map(function (f) { return `<code>${escapeHtml(f.key)}</code>`; })
+                        .join('');
+
+                    $grid.append(
+                        `<div class="aica-prompt-card">
+                            <div class="aica-prompt-card-header">
+                                <h3>${escapeHtml(p.name)}</h3>
+                                <div class="aica-prompt-badges">${badges.join('')}</div>
+                            </div>
+                            ${p.description ? `<p class="aica-prompt-desc">${escapeHtml(p.description)}</p>` : ''}
+                            <div class="aica-prompt-fields">${fields || '<span class="aica-field-hint">No output fields defined</span>'}</div>
+                        </div>`
+                    );
+                });
+
+                $container.empty().append($grid);
+            })
+            .catch(function (err) {
+                $loading.hide();
+                $container.html(
+                    `<div class="aica-empty-state">${escapeHtml(err.message || 'Failed to load prompts')}</div>`
+                );
+            });
+    }
+
     // ─── Connection Test ────────────────────────────────────
 
     function initConnectionTest() {
@@ -617,6 +770,7 @@
         });
         initGeneratePage();
         initBulkPage();
+        initPromptsPage();
         initConnectionTest();
     });
 

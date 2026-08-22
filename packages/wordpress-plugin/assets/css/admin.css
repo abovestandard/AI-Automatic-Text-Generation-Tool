@@ -3,37 +3,129 @@
 :root {
   --aica-primary: #2271b1;
   --aica-primary-dark: #135e96;
-  --aica-border: #c3c4c7;
+  --aica-primary-light: #f0f6fc;
+  --aica-border: #dcdcde;
   --aica-bg: #f6f7f7;
-  --aica-radius: 6px;
+  --aica-radius: 8px;
   --aica-text: #1d2327;
   --aica-muted: #646970;
+  --aica-success: #00a32a;
+  --aica-danger: #d63638;
 }
 
-/* ─── Shared panels ─────────────────────────────────────── */
+/* ─── Page layout ───────────────────────────────────────── */
 
-.aica-generation-panel,
-.card-like {
+.aica-page {
+  max-width: 900px;
+}
+
+.aica-page-header {
+  margin-bottom: 24px;
+}
+
+.aica-page-header h1,
+.aica-generate-page h1,
+.aica-bulk-page h1,
+.aica-prompts-page h1,
+.aica-dashboard h1 {
+  margin: 0 0 8px;
+  font-size: 23px;
+  font-weight: 600;
+  color: var(--aica-text);
+  padding: 0;
+}
+
+.aica-page-desc,
+.aica-generate-page > .description,
+.aica-bulk-page > .description {
+  font-size: 14px;
+  color: var(--aica-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ─── Cards ─────────────────────────────────────────────── */
+
+.card-like,
+.aica-generation-panel {
   background: #fff;
   border: 1px solid var(--aica-border);
   border-radius: var(--aica-radius);
-  padding: 20px;
-  margin: 12px 0 20px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-.aica-generation-panel h3,
-.aica-generate-page h1,
-.aica-bulk-page h1,
-.aica-dashboard h1 {
-  margin-top: 0;
-  font-size: 1.3em;
+.aica-generation-panel {
+  margin: 12px 0 20px;
+}
+
+.aica-generation-panel h3 {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ─── Wizard steps ──────────────────────────────────────── */
+
+.aica-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.aica-step {
+  margin-bottom: 0;
+}
+
+.aica-step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f0f0f1;
+}
+
+.aica-step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--aica-primary);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.aica-step-header h2 {
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
   color: var(--aica-text);
 }
 
+.aica-step-body {
+  padding: 0;
+}
+
+/* ─── Form fields ───────────────────────────────────────── */
+
+.aica-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.aica-field-full {
+  grid-column: 1 / -1;
+}
+
 .aica-field {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .aica-field label {
@@ -44,18 +136,35 @@
   color: var(--aica-text);
 }
 
+.aica-select,
 .aica-field select,
 .aica-field input[type="text"],
-.aica-field input[type="url"] {
+.aica-field input[type="url"],
+.aica-field input[type="file"] {
   width: 100%;
   max-width: 100%;
-  padding: 6px 10px;
+  padding: 8px 12px;
   border: 1px solid #8c8f94;
   border-radius: 4px;
   font-size: 14px;
   background: #fff;
+  color: var(--aica-text);
+  line-height: 1.4;
+  box-sizing: border-box;
+  appearance: auto;
 }
 
+.aica-select:disabled,
+.aica-field select:disabled {
+  background-color: #f6f7f7;
+  color: #a7aaad;
+  border-color: #dcdcde;
+  cursor: not-allowed;
+  opacity: 1;
+  background-image: none;
+}
+
+.aica-select:focus,
 .aica-field select:focus,
 .aica-field input:focus {
   border-color: var(--aica-primary);
@@ -66,14 +175,89 @@
 .aica-field-hint {
   font-size: 12px;
   color: var(--aica-muted);
+  margin: 6px 0 0;
+  line-height: 1.4;
+}
+
+.aica-field-hint a {
+  color: var(--aica-primary);
+}
+
+/* ─── Image upload ──────────────────────────────────────── */
+
+.aica-image-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.aica-file-input {
+  padding: 6px 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.aica-image-preview {
+  position: relative;
+  display: inline-block;
+  max-width: 200px;
+}
+
+.aica-image-preview img {
+  display: block;
+  max-width: 200px;
+  max-height: 140px;
+  border-radius: 6px;
+  border: 1px solid var(--aica-border);
+  object-fit: cover;
+}
+
+.aica-image-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: var(--aica-danger);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.aica-image-remove:hover {
+  background: #b32d2e;
+}
+
+/* ─── Actions ───────────────────────────────────────────── */
+
+.aica-actions,
+.aica-actions-row,
+.aica-preview-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.aica-actions-row {
   margin-top: 4px;
 }
 
 .aica-actions {
   margin-top: 16px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+}
+
+.aica-preview-actions {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--aica-border);
 }
 
 /* ─── Status & loading ──────────────────────────────────── */
@@ -82,9 +266,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 16px 0;
+  margin: 16px 0 0;
   padding: 12px 16px;
-  background: #f0f6fc;
+  background: var(--aica-primary-light);
   border: 1px solid #c3d9ed;
   border-radius: var(--aica-radius);
   color: var(--aica-muted);
@@ -105,7 +289,21 @@
   to { transform: rotate(360deg); }
 }
 
-/* ─── Preview ───────────────────────────────────────────── */
+/* ─── Preview panel ─────────────────────────────────────── */
+
+.aica-preview-panel {
+  margin-top: 20px;
+}
+
+.aica-preview-panel h2,
+.aica-preview h2,
+.aica-preview h3,
+.aica-preview h4 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--aica-text);
+}
 
 .aica-preview {
   margin-top: 20px;
@@ -113,17 +311,9 @@
   border-top: 1px solid var(--aica-border);
 }
 
-.aica-preview h2,
-.aica-preview h3,
-.aica-preview h4 {
-  margin-top: 0;
-  font-size: 1.1em;
-  color: var(--aica-text);
-}
-
 .aica-preview-field {
-  margin-bottom: 14px;
-  padding: 12px 14px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
   background: var(--aica-bg);
   border: 1px solid var(--aica-border);
   border-radius: var(--aica-radius);
@@ -141,7 +331,7 @@
 .aica-preview-value {
   font-size: 13px;
   color: #50575e;
-  max-height: 160px;
+  max-height: 200px;
   overflow-y: auto;
   white-space: pre-wrap;
   line-height: 1.5;
@@ -154,28 +344,20 @@
   padding: 8px 0;
   font-size: 13px;
   border-bottom: 1px solid #f0f0f1;
+  gap: 12px;
 }
 
-.aica-mapping-row:last-child { border-bottom: none; }
+.aica-mapping-row:last-child {
+  border-bottom: none;
+}
 
-.aica-mapping-status { color: var(--aica-muted); font-size: 12px; }
-
-.aica-preview-actions {
-  margin-top: 16px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.aica-mapping-status {
+  color: var(--aica-muted);
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 /* ─── Dashboard ─────────────────────────────────────────── */
-
-.aica-dashboard .description,
-.aica-generate-page > .description,
-.aica-bulk-page > .description {
-  font-size: 14px;
-  color: var(--aica-muted);
-  margin-bottom: 20px;
-}
 
 .aica-dashboard-cards {
   display: grid;
@@ -189,29 +371,130 @@
   border: 1px solid var(--aica-border);
   border-radius: var(--aica-radius);
   padding: 24px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .aica-card h2 {
-  margin-top: 0;
-  font-size: 1.1em;
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .aica-card ol {
-  margin: 12px 0 0 18px;
+  margin: 0 0 0 18px;
   line-height: 1.7;
   font-size: 14px;
   color: #50575e;
 }
 
-/* ─── Generate & Bulk config grids ──────────────────────── */
+/* ─── Prompts page ──────────────────────────────────────── */
 
-.aica-generate-config {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 20px;
-  align-items: start;
+.aica-prompts-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
 }
+
+.aica-prompts-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.aica-prompt-card {
+  padding: 16px 20px;
+  border: 1px solid var(--aica-border);
+  border-radius: var(--aica-radius);
+  background: #fff;
+}
+
+.aica-prompt-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.aica-prompt-card-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.aica-prompt-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.aica-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 10px;
+  background: #f0f0f1;
+  color: var(--aica-muted);
+}
+
+.aica-badge.vision {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.aica-prompt-desc {
+  font-size: 13px;
+  color: var(--aica-muted);
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
+.aica-prompt-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.aica-prompt-fields code {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: #f6f7f7;
+  border: 1px solid #dcdcde;
+  border-radius: 3px;
+}
+
+.aica-help-box h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.aica-help-box p,
+.aica-help-box ul {
+  font-size: 13px;
+  color: #50575e;
+  line-height: 1.6;
+  margin: 0 0 10px;
+}
+
+.aica-help-box ul {
+  padding-left: 20px;
+}
+
+.aica-help-box code {
+  font-size: 12px;
+}
+
+.aica-empty-state {
+  text-align: center;
+  padding: 32px 20px;
+  color: var(--aica-muted);
+  font-size: 14px;
+}
+
+/* ─── Bulk page ─────────────────────────────────────────── */
 
 .aica-bulk-config {
   display: grid;
@@ -221,17 +504,14 @@
   background: #fff;
   border: 1px solid var(--aica-border);
   border-radius: var(--aica-radius);
-  padding: 20px;
+  padding: 24px;
   margin-bottom: 20px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-.aica-bulk-config .aica-field,
-.aica-generate-config .aica-field {
+.aica-bulk-config .aica-field {
   margin-bottom: 0;
 }
-
-/* ─── Bulk progress ─────────────────────────────────────── */
 
 .aica-bulk-stats {
   display: flex;
@@ -242,10 +522,10 @@
 }
 
 .aica-stat { font-weight: 500; }
-.aica-stat.completed { color: #00a32a; }
+.aica-stat.completed { color: var(--aica-success); }
 .aica-stat.processing { color: var(--aica-primary); }
 .aica-stat.pending { color: #999; }
-.aica-stat.failed { color: #d63638; }
+.aica-stat.failed { color: var(--aica-danger); }
 
 .aica-progress-bar {
   height: 10px;
@@ -262,25 +542,48 @@
   border-radius: 5px;
 }
 
+/* ─── Metabox sidebar panel ─────────────────────────────── */
+
 #postbox-container-1 .aica-generation-panel {
   margin: 0;
 }
 
-/* ─── Notices inside plugin pages ───────────────────────── */
+.aica-panel-image-upload {
+  margin-top: 12px;
+}
 
+.aica-panel-image-preview {
+  margin-top: 8px;
+}
+
+.aica-panel-image-preview img {
+  max-width: 100%;
+  max-height: 80px;
+  border-radius: 4px;
+  border: 1px solid var(--aica-border);
+}
+
+/* ─── Notices ───────────────────────────────────────────── */
+
+.aica-page .notice,
 .aica-generate-page .notice,
-.aica-bulk-page .notice {
+.aica-bulk-page .notice,
+.aica-prompts-page .notice {
   margin: 0 0 20px;
 }
 
 /* ─── Responsive ────────────────────────────────────────── */
 
 @media (max-width: 782px) {
-  .aica-generate-config,
-  .aica-bulk-config {
+  .aica-form-grid {
     grid-template-columns: 1fr;
   }
 
+  .aica-field-full {
+    grid-column: auto;
+  }
+
+  .aica-bulk-config,
   .aica-dashboard-cards {
     grid-template-columns: 1fr;
   }

@@ -24,6 +24,8 @@ class AICA_Data_Collector {
             $acf_fields = get_fields($post_id);
             if ($acf_fields) {
                 $data['acf'] = $acf_fields;
+                $flat = AICA_ACF_Helper::flatten_values($acf_fields);
+                $data = array_merge($data, $flat);
                 foreach ($acf_fields as $key => $value) {
                     if (is_string($value)) {
                         $data[$key] = $value;
@@ -59,6 +61,8 @@ class AICA_Data_Collector {
             $acf_fields = get_fields("{$taxonomy}_{$term_id}");
             if ($acf_fields) {
                 $data['acf'] = $acf_fields;
+                $flat = AICA_ACF_Helper::flatten_values($acf_fields);
+                $data = array_merge($data, $flat);
                 foreach ($acf_fields as $key => $value) {
                     if (is_string($value)) {
                         $data[$key] = $value;

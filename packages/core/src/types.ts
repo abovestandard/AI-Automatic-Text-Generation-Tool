@@ -2,6 +2,7 @@
 
 export type FieldTargetType =
   | 'acf'
+  | 'acf_nested'
   | 'post_field'
   | 'term_field'
   | 'meta'

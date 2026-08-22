@@ -367,6 +367,90 @@ body {
   align-items: center;
 }
 
+/* Prompt form sections */
+.form-section { margin-bottom: 4px; }
+
+.form-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--color-text);
+}
+
+.output-fields-table {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.output-fields-header,
+.output-fields-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 120px 40px;
+  gap: 10px;
+  padding: 10px 14px;
+  align-items: center;
+}
+
+.output-fields-header {
+  background: #f8fafc;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.output-fields-row {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.output-fields-row:last-child { border-bottom: none; }
+
+.output-fields-row input,
+.output-fields-row select {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.prompt-list-card .card-actions { margin-top: 12px; }
+
+.prompt-output-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.prompt-output-preview code {
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+/* ACF mapping examples */
+.acf-examples { display: flex; flex-direction: column; gap: 8px; }
+
+.acf-example-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.acf-example-row code {
+  background: #f1f5f9;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* Tables */
 .data-table {
   width: 100%;

@@ -3,7 +3,7 @@
  * Plugin Name: AI Content Automation
  * Plugin URI: https://github.com/ai-content-automation
  * Description: Reusable AI-powered content generation tool that automatically generates and fills WordPress/ACF form fields.
- * Version: 1.2.0
+ * Version: 1.3.0
  * Author: AI Content Automation
  * License: GPL v2 or later
  * Text Domain: ai-content-automation
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('AICA_VERSION', '1.2.0');
+define('AICA_VERSION', '1.3.0');
 define('AICA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('AICA_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('AICA_PLUGIN_BASENAME', plugin_basename(__FILE__));
@@ -26,6 +26,7 @@ require_once AICA_PLUGIN_DIR . 'includes/class-aica-field-filler.php';
 require_once AICA_PLUGIN_DIR . 'includes/class-aica-data-collector.php';
 require_once AICA_PLUGIN_DIR . 'includes/class-aica-bulk-processor.php';
 require_once AICA_PLUGIN_DIR . 'includes/class-aica-content-registry.php';
+require_once AICA_PLUGIN_DIR . 'includes/class-aica-acf-helper.php';
 require_once AICA_PLUGIN_DIR . 'includes/class-aica-content-saver.php';
 require_once AICA_PLUGIN_DIR . 'includes/class-aica-rest-api.php';
 require_once AICA_PLUGIN_DIR . 'includes/class-aica-admin.php';
@@ -59,6 +60,7 @@ final class AI_Content_Automation {
             'toplevel_page_ai-content-automation',
             'ai-content_page_ai-content-generate',
             'ai-content_page_ai-content-bulk',
+            'ai-content_page_ai-content-prompts',
             'ai-content_page_ai-content-settings',
         ];
 
