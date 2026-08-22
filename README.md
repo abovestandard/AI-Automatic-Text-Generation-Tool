@@ -47,6 +47,10 @@ Select Content → Select Prompt → Generate → Review → Auto-Fill Fields �
 
 ## Quick Start
 
+### Requirements
+
+- **Node.js 22.5+** (uses built-in `node:sqlite` — no Visual Studio / C++ build tools needed on Windows)
+
 ### 1. Install Dependencies
 
 ```bash

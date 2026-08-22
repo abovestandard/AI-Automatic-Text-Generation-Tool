@@ -124,7 +124,8 @@ apiRouter.put('/prompts/:id', (req: Request, res: Response) => {
   `).run(
     name ?? existing.name, description ?? existing.description, sysPrompt, userPrompt,
     JSON.stringify(outputFields ?? JSON.parse(String(existing.output_fields))),
-    model ?? existing.model, supportsVision !== undefined ? (supportsVision ? 1 : 0) : existing.supports_vision,
+    model ?? (existing.model as string | null),
+    supportsVision !== undefined ? (supportsVision ? 1 : 0) : (existing.supports_vision as number),
     responseFormat ?? existing.response_format, JSON.stringify(variables), now, req.params.id
   );
 
@@ -145,7 +146,7 @@ apiRouter.get('/projects/:projectId/mappings', (req: Request, res: Response) => 
   const { promptId } = req.query;
   let rows;
   if (promptId) {
-    rows = db.prepare('SELECT * FROM field_mappings WHERE project_id = ? AND prompt_id = ?').all(req.params.projectId, promptId);
+    rows = db.prepare('SELECT * FROM field_mappings WHERE project_id = ? AND prompt_id = ?').all(req.params.projectId, String(promptId));
   } else {
     rows = db.prepare('SELECT * FROM field_mappings WHERE project_id = ?').all(req.params.projectId);
   }
