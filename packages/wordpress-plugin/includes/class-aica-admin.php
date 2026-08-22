@@ -40,6 +40,15 @@ class AICA_Admin {
             'ai-content-bulk',
             [$this, 'render_bulk_page']
         );
+
+        add_submenu_page(
+            'ai-content-automation',
+            __('Settings', 'ai-content-automation'),
+            __('Settings', 'ai-content-automation'),
+            'manage_options',
+            'ai-content-settings',
+            [AICA_Settings::instance(), 'render_settings_page']
+        );
     }
 
     public function add_generation_metabox(): void {
@@ -148,9 +157,32 @@ class AICA_Admin {
     }
 
     public function render_bulk_page(): void {
+        $api_url    = AICA_Settings::get('api_url', '');
+        $project_id = AICA_Settings::get('project_id', '');
         ?>
         <div class="wrap aica-bulk-page">
             <h1><?php esc_html_e('Bulk AI Content Generation', 'ai-content-automation'); ?></h1>
+
+            <?php if (empty($project_id)) : ?>
+                <div class="notice notice-warning">
+                    <p>
+                        <?php esc_html_e('Platform is not configured yet.', 'ai-content-automation'); ?>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=ai-content-settings')); ?>">
+                            <?php esc_html_e('Go to Settings', 'ai-content-automation'); ?>
+                        </a>
+                        <?php esc_html_e('and enter your API URL and Project ID.', 'ai-content-automation'); ?>
+                    </p>
+                </div>
+            <?php elseif (empty($api_url)) : ?>
+                <div class="notice notice-warning">
+                    <p>
+                        <?php esc_html_e('API URL is not configured.', 'ai-content-automation'); ?>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=ai-content-settings')); ?>">
+                            <?php esc_html_e('Go to Settings', 'ai-content-automation'); ?>
+                        </a>
+                    </p>
+                </div>
+            <?php endif; ?>
 
             <div class="aica-bulk-config">
                 <div class="aica-field">

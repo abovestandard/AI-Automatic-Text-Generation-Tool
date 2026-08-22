@@ -230,6 +230,10 @@
     function loadPrompts($select) {
         wp.apiFetch({ path: '/ai-content/v1/prompts' })
             .then(function (prompts) {
+                if (prompts && prompts.error) {
+                    $select.empty().append(`<option value="">${escapeHtml(prompts.error)}</option>`);
+                    return;
+                }
                 $select.empty().append('<option value="">Select a prompt...</option>');
                 (prompts || []).forEach(function (p) {
                     $select.append(`<option value="${p.id}">${escapeHtml(p.name)}</option>`);
@@ -238,8 +242,9 @@
                     $select.val(config.defaultPromptId);
                 }
             })
-            .catch(function () {
-                $select.empty().append('<option value="">Failed to load prompts</option>');
+            .catch(function (err) {
+                const message = err.message || 'Failed to load prompts';
+                $select.empty().append(`<option value="">${escapeHtml(message)}</option>`);
             });
     }
 

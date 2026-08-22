@@ -14,7 +14,6 @@ class AICA_Settings {
     }
 
     private function __construct() {
-        add_action('admin_menu', [$this, 'add_settings_page']);
         add_action('admin_init', [$this, 'register_settings']);
     }
 
@@ -27,17 +26,6 @@ class AICA_Settings {
         $settings = get_option(self::OPTION_KEY, []);
         $settings[$key] = $value;
         update_option(self::OPTION_KEY, $settings);
-    }
-
-    public function add_settings_page(): void {
-        add_submenu_page(
-            'ai-content-automation',
-            __('Settings', 'ai-content-automation'),
-            __('Settings', 'ai-content-automation'),
-            'manage_options',
-            'ai-content-settings',
-            [$this, 'render_settings_page']
-        );
     }
 
     public function register_settings(): void {

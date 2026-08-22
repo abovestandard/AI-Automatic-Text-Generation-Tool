@@ -113,8 +113,20 @@ class AICA_REST_API {
     }
 
     public function get_prompts(WP_REST_Request $request): WP_REST_Response {
+        $project_id = AICA_Settings::get('project_id', '');
+        if (empty($project_id)) {
+            return new WP_REST_Response([
+                'error' => 'Project ID is not configured. Go to AI Content → Settings and enter your Project ID.',
+            ], 400);
+        }
+
         $client = new AICA_API_Client();
         $prompts = $client->get_prompts();
+
+        if (isset($prompts['error'])) {
+            return new WP_REST_Response(['error' => $prompts['error']], 500);
+        }
+
         return new WP_REST_Response($prompts);
     }
 

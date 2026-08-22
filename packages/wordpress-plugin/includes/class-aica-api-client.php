@@ -75,7 +75,16 @@ class AICA_API_Client {
 
     private function handle_response($response): array {
         if (is_wp_error($response)) {
-            return ['error' => $response->get_error_message()];
+            $message = $response->get_error_message();
+            if (strpos($message, 'Connection refused') !== false || strpos($message, 'cURL error 7') !== false) {
+                return [
+                    'error' => sprintf(
+                        'Cannot connect to the platform API at %s. Make sure the API server is running (npm start).',
+                        $this->api_url
+                    ),
+                ];
+            }
+            return ['error' => $message];
         }
         $body = json_decode(wp_remote_retrieve_body($response), true);
         $code = wp_remote_retrieve_response_code($response);
