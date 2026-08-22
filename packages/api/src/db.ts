@@ -111,6 +111,13 @@ function migrate(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_results_project ON generation_results(project_id);
     CREATE INDEX IF NOT EXISTS idx_jobs_project ON bulk_jobs(project_id);
   `);
+
+  // Migrations for existing databases
+  try {
+    database.exec(`ALTER TABLE projects ADD COLUMN gemini_api_key TEXT`);
+  } catch {
+    // Column already exists
+  }
 }
 
 export function closeDb(): void {

@@ -1,21 +1,18 @@
-import OpenAI from 'openai';
 import {
   buildOutputSchemaInstruction,
   renderTemplate,
   parseJsonResponse,
   mapGeneratedContent,
-  getMappingForPrompt,
 } from '@ai-content/core';
 import type {
   GenerationRequest,
   GenerationResult,
   Prompt,
-  Project,
   FieldMapping,
-  ImageInput,
 } from '@ai-content/core';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
+import { completeAI } from './ai-providers';
 
 interface PromptRow {
   id: string;
@@ -34,6 +31,7 @@ interface PromptRow {
 interface ProjectRow {
   id: string;
   openai_api_key: string | null;
+  gemini_api_key: string | null;
   default_model: string;
 }
 
@@ -77,52 +75,33 @@ export async function generateContent(
     return errorResult(resultId, request, 'Project not found');
   }
 
-  const apiKey = projectRow.openai_api_key || process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return errorResult(resultId, request, 'OpenAI API key not configured');
-  }
-
   const prompt = rowToPrompt(promptRow);
-  const openai = new OpenAI({ apiKey });
-  const model = prompt.model || projectRow.default_model || 'gpt-4o';
+  const model = prompt.model || projectRow.default_model || 'gpt-4o-mini';
 
   const renderedUserPrompt = renderTemplate(prompt.userPromptTemplate, request.sourceData);
   const schemaInstruction = buildOutputSchemaInstruction(prompt.outputFields);
   const fullUserPrompt = `${renderedUserPrompt}\n\n${schemaInstruction}`;
 
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: prompt.systemPrompt },
-  ];
-
-  if (prompt.supportsVision && request.images && request.images.length > 0) {
-    const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
-      { type: 'text', text: fullUserPrompt },
-    ];
-
-    for (const img of request.images) {
-      const imageUrl = img.base64
-        ? `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}`
-        : img.url;
-      contentParts.push({
-        type: 'image_url',
-        image_url: { url: imageUrl, detail: 'auto' },
-      });
-    }
-
-    messages.push({ role: 'user', content: contentParts });
-  } else {
-    messages.push({ role: 'user', content: fullUserPrompt });
-  }
+  const images = prompt.supportsVision && request.images?.length
+    ? request.images.map((img) => ({
+        url: img.url,
+        base64: img.base64,
+        mimeType: img.mimeType,
+      }))
+    : undefined;
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await completeAI({
       model,
-      messages,
-      response_format: prompt.responseFormat === 'json' ? { type: 'json_object' } : undefined,
-      temperature: 0.7,
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: fullUserPrompt,
+      responseFormat: prompt.responseFormat,
+      images,
+      openaiApiKey: projectRow.openai_api_key || process.env.OPENAI_API_KEY,
+      geminiApiKey: projectRow.gemini_api_key || process.env.GEMINI_API_KEY,
     });
 
-    const rawResponse = completion.choices[0]?.message?.content || '';
+    const rawResponse = completion.content;
     let generatedContent: Record<string, string>;
 
     if (prompt.responseFormat === 'json') {
@@ -172,7 +151,7 @@ export async function generateContent(
       generatedContent,
       mappedFields,
       rawResponse,
-      tokensUsed: completion.usage?.total_tokens,
+      tokensUsed: completion.tokensUsed,
       createdAt: new Date().toISOString(),
     };
 

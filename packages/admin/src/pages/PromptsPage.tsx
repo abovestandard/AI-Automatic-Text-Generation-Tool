@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, Prompt, OutputField } from '../api';
+import ModelSelect from '../components/ModelSelect';
 
 const DEFAULT_OUTPUT_FIELDS: OutputField[] = [
   { key: 'seo_title', label: 'SEO Title', type: 'text' },
@@ -123,11 +124,12 @@ export default function PromptsPage() {
             </div>
             <div className="form-group">
               <label>Model (optional override)</label>
-              <select value={form.model} onChange={e => setForm({ ...form, model: e.target.value })}>
-                <option value="">Project default</option>
-                <option value="gpt-4o">GPT-4o</option>
-                <option value="gpt-4o-mini">GPT-4o Mini</option>
-              </select>
+              <ModelSelect
+                value={form.model}
+                onChange={(v) => setForm({ ...form, model: v })}
+                includeDefault
+                defaultLabel="Use project default"
+              />
             </div>
           </div>
 

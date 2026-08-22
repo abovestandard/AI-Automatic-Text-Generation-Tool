@@ -35,6 +35,7 @@ export const api = {
   deleteMapping: (id: string) => request<void>(`/mappings/${id}`, { method: 'DELETE' }),
 
   generate: (data: Record<string, unknown>) => request<GenerationResult>('/generate', { method: 'POST', body: JSON.stringify(data) }),
+  getModels: () => request<AIModel[]>('/models'),
   getBulkJobs: (projectId: string) => request<BulkJob[]>(`/projects/${projectId}/bulk-jobs`),
 };
 
@@ -46,8 +47,18 @@ export interface Project {
   defaultModel: string;
   defaultLanguage: string;
   hasOpenaiKey: boolean;
+  hasGeminiKey: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AIModel {
+  id: string;
+  label: string;
+  provider: 'openai' | 'google';
+  supportsVision: boolean;
+  description?: string;
+  freeTier?: boolean;
 }
 
 export interface Prompt {

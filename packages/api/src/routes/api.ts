@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { extractVariables } from '@ai-content/core';
+import { AI_MODELS, extractVariables } from '@ai-content/core';
 import { getDb } from '../db';
 import { generateContent } from '../services/generation';
 import { createBulkJob, getBulkJob, processBulkJob, retryFailedItems, getJobStats } from '../services/bulk-queue';
@@ -22,16 +22,20 @@ apiRouter.get('/projects/:id', (req: Request, res: Response) => {
   res.json(formatProject(row));
 });
 
+apiRouter.get('/models', (_req: Request, res: Response) => {
+  res.json(AI_MODELS);
+});
+
 apiRouter.post('/projects', (req: Request, res: Response) => {
   const db = getDb();
   const id = uuidv4();
   const now = new Date().toISOString();
-  const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, defaultModel, defaultLanguage } = req.body;
+  const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, geminiApiKey, defaultModel, defaultLanguage } = req.body;
 
   db.prepare(`
-    INSERT INTO projects (id, name, description, wordpress_url, wordpress_api_key, openai_api_key, default_model, default_language, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, description || null, wordpressUrl || null, wordpressApiKey || null, openaiApiKey || null, defaultModel || 'gpt-4o', defaultLanguage || 'en', now, now);
+    INSERT INTO projects (id, name, description, wordpress_url, wordpress_api_key, openai_api_key, gemini_api_key, default_model, default_language, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, description || null, wordpressUrl || null, wordpressApiKey || null, openaiApiKey || null, geminiApiKey || null, defaultModel || 'gpt-4o-mini', defaultLanguage || 'en', now, now);
 
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
   res.status(201).json(formatProject(row));
@@ -42,20 +46,29 @@ apiRouter.put('/projects/:id', (req: Request, res: Response) => {
   const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Project not found' });
 
-  const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, defaultModel, defaultLanguage } = req.body;
+  const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, geminiApiKey, defaultModel, defaultLanguage } = req.body;
   const now = new Date().toISOString();
+  const ex = existing as Record<string, unknown>;
+
+  const updatedOpenaiKey = openaiApiKey !== undefined && openaiApiKey !== ''
+    ? openaiApiKey
+    : (ex.openai_api_key as string | null);
+  const updatedGeminiKey = geminiApiKey !== undefined && geminiApiKey !== ''
+    ? geminiApiKey
+    : (ex.gemini_api_key as string | null);
 
   db.prepare(`
     UPDATE projects SET name = ?, description = ?, wordpress_url = ?, wordpress_api_key = ?,
-    openai_api_key = ?, default_model = ?, default_language = ?, updated_at = ? WHERE id = ?
+    openai_api_key = ?, gemini_api_key = ?, default_model = ?, default_language = ?, updated_at = ? WHERE id = ?
   `).run(
-    name ?? (existing as { name: string }).name,
-    description ?? (existing as { description: string }).description,
-    wordpressUrl ?? (existing as { wordpress_url: string }).wordpress_url,
-    wordpressApiKey ?? (existing as { wordpress_api_key: string }).wordpress_api_key,
-    openaiApiKey ?? (existing as { openai_api_key: string }).openai_api_key,
-    defaultModel ?? (existing as { default_model: string }).default_model,
-    defaultLanguage ?? (existing as { default_language: string }).default_language,
+    name ?? ex.name,
+    description !== undefined ? description : ex.description,
+    wordpressUrl !== undefined ? wordpressUrl : ex.wordpress_url,
+    wordpressApiKey !== undefined ? wordpressApiKey : ex.wordpress_api_key,
+    updatedOpenaiKey,
+    updatedGeminiKey,
+    defaultModel ?? ex.default_model,
+    defaultLanguage ?? ex.default_language,
     now,
     req.params.id
   );
@@ -281,7 +294,9 @@ function formatProject(row: unknown) {
   return {
     id: r.id, name: r.name, description: r.description,
     wordpressUrl: r.wordpress_url, wordpressApiKey: r.wordpress_api_key ? '***' : null,
-    hasOpenaiKey: !!r.openai_api_key, defaultModel: r.default_model, defaultLanguage: r.default_language,
+    hasOpenaiKey: !!r.openai_api_key,
+    hasGeminiKey: !!r.gemini_api_key,
+    defaultModel: r.default_model, defaultLanguage: r.default_language,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }

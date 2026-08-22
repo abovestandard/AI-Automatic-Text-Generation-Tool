@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api, Project } from '../api';
+import ModelSelect from '../components/ModelSelect';
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o' });
+  const [form, setForm] = useState({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini' });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadProjects(); }, []);
@@ -25,7 +26,7 @@ export default function ProjectsPage() {
     e.preventDefault();
     await api.createProject(form);
     setShowForm(false);
-    setForm({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o' });
+    setForm({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini' });
     loadProjects();
   }
 
@@ -62,11 +63,7 @@ export default function ProjectsPage() {
           </div>
           <div className="form-group">
             <label>Default AI Model</label>
-            <select value={form.defaultModel} onChange={e => setForm({ ...form, defaultModel: e.target.value })}>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
-              <option value="gpt-4-turbo">GPT-4 Turbo</option>
-            </select>
+            <ModelSelect value={form.defaultModel} onChange={(v) => setForm({ ...form, defaultModel: v })} />
           </div>
           <button type="submit" className="btn btn-primary">Create Project</button>
         </form>
@@ -78,8 +75,9 @@ export default function ProjectsPage() {
             <h3>{p.name}</h3>
             {p.description && <p className="text-muted">{p.description}</p>}
             <div className="card-meta">
-              <span>Model: {p.defaultModel}</span>
-              <span>{p.hasOpenaiKey ? 'API Key: Set' : 'API Key: Not set'}</span>
+              <span className="badge">{p.defaultModel}</span>
+              <span>{p.hasOpenaiKey ? 'OpenAI ✓' : 'OpenAI ○'}</span>
+              <span>{p.hasGeminiKey ? 'Gemini ✓' : 'Gemini ○'}</span>
             </div>
             <div className="card-actions">
               <Link to={`/projects/${p.id}`} className="btn btn-sm">Configure</Link>
