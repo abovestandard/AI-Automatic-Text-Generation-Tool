@@ -70,6 +70,12 @@ class AICA_REST_API {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route($namespace, '/bulk/retry/(?P<job_id>[a-zA-Z0-9-]+)', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'bulk_retry'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         register_rest_route($namespace, '/content-types', [
             'methods'             => 'GET',
             'callback'            => [$this, 'get_content_types'],
@@ -274,49 +280,68 @@ class AICA_REST_API {
     }
 
     public function bulk_generate(WP_REST_Request $request): WP_REST_Response {
-        $client = new AICA_API_Client();
         $params = $request->get_json_params();
+        $items  = $params['items'] ?? [];
 
-        $items = $params['items'] ?? [];
-        $item_data = [];
-
-        foreach ($items as $item) {
-            $item_id   = (int) ($item['itemId'] ?? 0);
-            $item_type = sanitize_text_field($item['itemType'] ?? 'post');
-            $taxonomy  = sanitize_text_field($item['taxonomy'] ?? '');
-
-            if ($item_type === 'term') {
-                $source_data = AICA_Data_Collector::collect_term_data($item_id, $taxonomy);
-            } else {
-                $source_data = AICA_Data_Collector::collect_post_data($item_id);
-            }
-
-            $item_data[(string) $item_id] = [
-                'sourceData' => $source_data,
-                'images'     => AICA_Data_Collector::collect_images($source_data),
-            ];
+        if (empty($items)) {
+            return new WP_REST_Response(['error' => 'No items selected for bulk generation.'], 400);
         }
 
-        $job = $client->create_bulk_job([
+        if (empty($params['promptId'])) {
+            return new WP_REST_Response(['error' => 'Prompt ID is required.'], 400);
+        }
+
+        $job = AICA_Bulk_Processor::create_job([
             'promptId'  => sanitize_text_field($params['promptId'] ?? ''),
             'name'      => sanitize_text_field($params['name'] ?? 'Bulk Generation'),
             'items'     => $items,
-            'applyMode' => sanitize_text_field($params['applyMode'] ?? 'preview'),
+            'applyMode' => sanitize_text_field($params['applyMode'] ?? 'empty_only'),
+            'acfAuto'   => !empty($params['acfAuto']),
         ]);
-
-        if (isset($job['error'])) {
-            return new WP_REST_Response(['error' => $job['error']], 500);
-        }
-
-        $client->start_bulk_job($job['id'], $item_data);
 
         return new WP_REST_Response(['job' => $job]);
     }
 
     public function bulk_status(WP_REST_Request $request): WP_REST_Response {
-        $client = new AICA_API_Client();
-        $job = $client->get_bulk_job($request->get_param('job_id'));
-        return new WP_REST_Response($job);
+        $job_id = sanitize_text_field($request->get_param('job_id'));
+        $job    = AICA_Bulk_Processor::get_job($job_id);
+
+        if (!$job) {
+            return new WP_REST_Response(['error' => 'Bulk job not found.'], 404);
+        }
+
+        if (in_array($job['status'], ['queued', 'running'], true)) {
+            $job = AICA_Bulk_Processor::process_next($job_id);
+        }
+
+        if (!$job) {
+            return new WP_REST_Response(['error' => 'Bulk job not found.'], 404);
+        }
+
+        return new WP_REST_Response([
+            'id'          => $job['id'],
+            'status'      => $job['status'],
+            'applyMode'   => $job['applyMode'],
+            'items'       => $job['items'],
+            'createdAt'   => $job['createdAt'],
+            'updatedAt'   => $job['updatedAt'],
+            'completedAt' => $job['completedAt'] ?? null,
+            'stats'       => AICA_Bulk_Processor::get_job_stats($job),
+        ]);
+    }
+
+    public function bulk_retry(WP_REST_Request $request): WP_REST_Response {
+        $job_id = sanitize_text_field($request->get_param('job_id'));
+        $job    = AICA_Bulk_Processor::retry_failed($job_id);
+
+        if (!$job) {
+            return new WP_REST_Response(['error' => 'Bulk job not found.'], 404);
+        }
+
+        return new WP_REST_Response([
+            'job'   => $job,
+            'stats' => AICA_Bulk_Processor::get_job_stats($job),
+        ]);
     }
 
     public function save_content(WP_REST_Request $request): WP_REST_Response {

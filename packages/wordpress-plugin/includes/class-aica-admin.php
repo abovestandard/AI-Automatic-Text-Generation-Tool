@@ -446,10 +446,19 @@ class AICA_Admin {
                 <div class="aica-field">
                     <label><?php esc_html_e('Apply Mode', 'ai-content-automation'); ?></label>
                     <select id="aica-bulk-apply-mode">
-                        <option value="preview"><?php esc_html_e('Generate & Preview', 'ai-content-automation'); ?></option>
                         <option value="empty_only"><?php esc_html_e('Fill Empty Fields Only', 'ai-content-automation'); ?></option>
                         <option value="replace"><?php esc_html_e('Replace Existing Content', 'ai-content-automation'); ?></option>
+                        <option value="preview"><?php esc_html_e('Generate Only (no save)', 'ai-content-automation'); ?></option>
                     </select>
+                    <p class="description"><?php esc_html_e('Bulk generation saves directly to WordPress for all modes except "Generate Only".', 'ai-content-automation'); ?></p>
+                </div>
+
+                <div class="aica-field">
+                    <label>
+                        <input type="checkbox" id="aica-bulk-acf-auto" checked />
+                        <?php esc_html_e('ACF Auto Mode', 'ai-content-automation'); ?>
+                    </label>
+                    <p class="description"><?php esc_html_e('Automatically detect and map ACF fields for each item.', 'ai-content-automation'); ?></p>
                 </div>
 
                 <button type="button" class="button" id="aica-bulk-load-items">
@@ -487,7 +496,9 @@ class AICA_Admin {
                     <span class="aica-stat processing">⏳ <span id="aica-stat-processing">0</span> <?php esc_html_e('processing', 'ai-content-automation'); ?></span>
                     <span class="aica-stat pending">○ <span id="aica-stat-pending">0</span> <?php esc_html_e('pending', 'ai-content-automation'); ?></span>
                     <span class="aica-stat failed">✕ <span id="aica-stat-failed">0</span> <?php esc_html_e('failed', 'ai-content-automation'); ?></span>
+                    <span class="aica-stat saved">💾 <span id="aica-stat-saved">0</span> <?php esc_html_e('fields saved', 'ai-content-automation'); ?></span>
                 </div>
+                <p id="aica-bulk-status-message" class="description" style="display:none;"></p>
                 <div class="aica-progress-bar">
                     <div class="aica-progress-fill" style="width: 0%"></div>
                 </div>

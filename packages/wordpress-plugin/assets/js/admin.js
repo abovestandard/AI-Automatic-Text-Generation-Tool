@@ -713,6 +713,7 @@
     function startBulkGeneration() {
         const promptId = $('#aica-bulk-prompt').val();
         const applyMode = $('#aica-bulk-apply-mode').val();
+        const acfAuto = $('#aica-bulk-acf-auto').is(':checked');
         if (!promptId) { alert('Select a prompt.'); return; }
 
         const items = [];
@@ -722,11 +723,15 @@
                 itemType: $(this).data('type') || 'term',
                 itemLabel: $(this).data('label'),
                 taxonomy: $(this).data('taxonomy') || 'category',
+                postType: $(this).data('post-type') || '',
             });
         });
 
         $('#aica-bulk-start').prop('disabled', true);
         $('#aica-bulk-progress').show();
+        $('#aica-bulk-status-message').hide().text('');
+        $('#aica-stat-completed, #aica-stat-processing, #aica-stat-pending, #aica-stat-failed, #aica-stat-saved').text('0');
+        $('.aica-progress-fill').css('width', '0%');
 
         wp.apiFetch({
             path: '/ai-content/v1/bulk/generate',
@@ -734,13 +739,18 @@
             data: {
                 promptId,
                 applyMode,
+                acfAuto,
                 name: `Bulk - ${new Date().toLocaleString()}`,
                 items,
             },
         }).then(function (response) {
             bulkJobId = response.job?.id;
             if (bulkJobId) {
+                pollBulkStatus();
                 pollInterval = setInterval(pollBulkStatus, 2000);
+            } else {
+                alert('Bulk generation failed: job was not created.');
+                $('#aica-bulk-start').prop('disabled', false);
             }
         }).catch(function (err) {
             alert('Bulk generation failed: ' + (err.message || 'Unknown error'));
@@ -757,6 +767,7 @@
                 $('#aica-stat-processing').text(stats.processing || 0);
                 $('#aica-stat-pending').text(stats.pending || 0);
                 $('#aica-stat-failed').text(stats.failed || 0);
+                $('#aica-stat-saved').text(stats.saved || 0);
 
                 const total = stats.total || 1;
                 const progress = ((stats.completed || 0) / total) * 100;
@@ -764,11 +775,28 @@
 
                 if (job.status === 'completed') {
                     clearInterval(pollInterval);
+                    pollInterval = null;
                     $('#aica-bulk-start').prop('disabled', false);
+
+                    const applyMode = $('#aica-bulk-apply-mode').val();
+                    let message = `Bulk generation completed: ${stats.completed || 0} of ${stats.total || 0} items processed.`;
+                    if (applyMode === 'preview') {
+                        message += ' No fields were saved because "Generate Only" mode was selected.';
+                    } else {
+                        message += ` ${stats.saved || 0} field(s) saved to WordPress.`;
+                    }
                     if (stats.failed > 0) {
+                        message += ` ${stats.failed} item(s) failed.`;
                         $('#aica-bulk-retry').show();
                     }
+                    $('#aica-bulk-status-message').text(message).show();
                 }
+            })
+            .catch(function (err) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                $('#aica-bulk-start').prop('disabled', false);
+                alert('Bulk status check failed: ' + (err.message || 'Unknown error'));
             });
     }
 

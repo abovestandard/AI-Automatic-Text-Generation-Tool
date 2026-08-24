@@ -3,6 +3,9 @@ if (!defined('ABSPATH')) exit;
 
 class AICA_Bulk_Processor {
 
+    private const OPTION_KEY = 'aica_bulk_jobs';
+    private const MAX_JOBS   = 20;
+
     public static function get_items_for_type(string $content_type, int $limit = 200): array {
         $parsed = AICA_Content_Registry::parse_content_type($content_type);
         if (!$parsed) {
@@ -23,11 +26,269 @@ class AICA_Bulk_Processor {
         }, $items);
     }
 
-    public static function get_categories(int $limit = 100): array {
-        return self::get_items_for_type('taxonomy:category', $limit);
+    public static function create_job(array $params): array {
+        $items = [];
+        foreach ($params['items'] ?? [] as $item) {
+            $items[] = [
+                'id'          => wp_generate_uuid4(),
+                'itemId'      => (int) ($item['itemId'] ?? 0),
+                'itemType'    => sanitize_text_field($item['itemType'] ?? 'term'),
+                'itemLabel'   => sanitize_text_field($item['itemLabel'] ?? ''),
+                'taxonomy'    => sanitize_text_field($item['taxonomy'] ?? ''),
+                'postType'    => sanitize_text_field($item['postType'] ?? ''),
+                'status'      => 'pending',
+                'retryCount'  => 0,
+                'savedCount'  => 0,
+            ];
+        }
+
+        $job = [
+            'id'        => wp_generate_uuid4(),
+            'promptId'  => sanitize_text_field($params['promptId'] ?? ''),
+            'applyMode' => sanitize_text_field($params['applyMode'] ?? 'empty_only'),
+            'acfAuto'   => !empty($params['acfAuto']),
+            'name'      => sanitize_text_field($params['name'] ?? 'Bulk Generation'),
+            'status'    => 'queued',
+            'items'     => $items,
+            'createdAt' => current_time('c'),
+            'updatedAt' => current_time('c'),
+        ];
+
+        self::save_job($job);
+        return $job;
     }
 
-    public static function get_posts(string $post_type = 'post', int $limit = 100): array {
-        return self::get_items_for_type("post_type:{$post_type}", $limit);
+    public static function get_job(string $job_id): ?array {
+        $jobs = self::get_all_jobs();
+        return $jobs[$job_id] ?? null;
+    }
+
+    public static function get_job_with_stats(string $job_id): ?array {
+        $job = self::get_job($job_id);
+        if (!$job) {
+            return null;
+        }
+
+        return [
+            'job'   => $job,
+            'stats' => self::get_job_stats($job),
+        ];
+    }
+
+    /**
+     * Process the next pending item in a bulk job (one item per request).
+     */
+    public static function process_next(string $job_id): ?array {
+        $job = self::get_job($job_id);
+        if (!$job || in_array($job['status'], ['completed', 'failed'], true)) {
+            return $job;
+        }
+
+        $job['status']    = 'running';
+        $job['updatedAt'] = current_time('c');
+
+        $next_index = null;
+        foreach ($job['items'] as $index => $item) {
+            if (($item['status'] ?? '') === 'pending') {
+                $next_index = $index;
+                break;
+            }
+        }
+
+        if ($next_index === null) {
+            $job['status']      = 'completed';
+            $job['completedAt'] = current_time('c');
+            self::save_job($job);
+            return $job;
+        }
+
+        $job['items'][$next_index]['status'] = 'processing';
+        self::save_job($job);
+
+        try {
+            $result = self::process_item($job['items'][$next_index], $job);
+            $job = self::get_job($job_id);
+            if (!$job) {
+                return null;
+            }
+
+            $job['items'][$next_index]['status']              = 'completed';
+            $job['items'][$next_index]['generationResultId']  = $result['generationResultId'] ?? '';
+            $job['items'][$next_index]['savedCount']            = $result['savedCount'] ?? 0;
+            $job['items'][$next_index]['error']                 = '';
+        } catch (Exception $e) {
+            $job = self::get_job($job_id);
+            if (!$job) {
+                return null;
+            }
+
+            $job['items'][$next_index]['status'] = 'failed';
+            $job['items'][$next_index]['error']  = $e->getMessage();
+        }
+
+        $has_pending = false;
+        $has_failed  = false;
+        foreach ($job['items'] as $item) {
+            if (($item['status'] ?? '') === 'pending') {
+                $has_pending = true;
+            }
+            if (($item['status'] ?? '') === 'failed') {
+                $has_failed = true;
+            }
+        }
+
+        if ($has_pending) {
+            $job['status'] = 'running';
+        } else {
+            $job['status']      = 'completed';
+            $job['completedAt'] = current_time('c');
+        }
+
+        $job['updatedAt'] = current_time('c');
+        self::save_job($job);
+
+        return $job;
+    }
+
+    public static function retry_failed(string $job_id): ?array {
+        $job = self::get_job($job_id);
+        if (!$job) {
+            return null;
+        }
+
+        foreach ($job['items'] as $index => $item) {
+            if (($item['status'] ?? '') === 'failed') {
+                $job['items'][$index]['status']     = 'pending';
+                $job['items'][$index]['error']      = '';
+                $job['items'][$index]['retryCount'] = (int) ($item['retryCount'] ?? 0) + 1;
+            }
+        }
+
+        $job['status']      = 'queued';
+        $job['completedAt'] = null;
+        $job['updatedAt']   = current_time('c');
+        self::save_job($job);
+
+        return $job;
+    }
+
+    private static function process_item(array $item, array $job): array {
+        $client    = new AICA_API_Client();
+        $item_id   = (int) ($item['itemId'] ?? 0);
+        $item_type = $item['itemType'] ?? 'term';
+        $taxonomy  = $item['taxonomy'] ?? '';
+
+        if (!$item_id) {
+            throw new Exception('Invalid item ID');
+        }
+
+        if ($item_type === 'term') {
+            $source_data = AICA_Data_Collector::collect_term_data($item_id, $taxonomy);
+        } else {
+            $source_data = AICA_Data_Collector::collect_post_data($item_id);
+        }
+
+        $payload = [
+            'promptId'   => $job['promptId'],
+            'itemId'     => $item_id,
+            'itemType'   => $item_type,
+            'taxonomy'   => $taxonomy,
+            'sourceData' => $source_data,
+            'images'     => AICA_Data_Collector::collect_images($source_data),
+            'applyMode'  => $job['applyMode'],
+        ];
+
+        if (!empty($job['acfAuto'])) {
+            $kind = $item_type === 'term' ? 'taxonomy' : 'post_type';
+            $slug = $item_type === 'term'
+                ? $taxonomy
+                : ($item['postType'] ?: get_post_type($item_id));
+
+            if ($slug) {
+                $acf_schema = AICA_ACF_Schema_Builder::get_generatable_schema($kind, $slug, $source_data);
+                if (empty($acf_schema['outputFields'])) {
+                    throw new Exception(sprintf(
+                        'ACF Auto Mode found 0 generatable fields for %s "%s".',
+                        $kind,
+                        $slug
+                    ));
+                }
+                $payload['acfAuto']   = true;
+                $payload['acfSchema'] = $acf_schema;
+            }
+        }
+
+        $result = $client->generate($payload);
+        if (!empty($result['error'])) {
+            throw new Exception($result['error']);
+        }
+        if (($result['status'] ?? '') !== 'success') {
+            throw new Exception($result['error'] ?? 'Generation failed');
+        }
+
+        $saved_count = 0;
+        $apply_mode  = $job['applyMode'] ?? 'preview';
+
+        if (!in_array($apply_mode, ['preview', 'generate_only'], true)) {
+            $mapped_fields = $result['mappedFields'] ?? [];
+            if (!empty($mapped_fields)) {
+                $save_results = AICA_Content_Saver::save_mapped_fields(
+                    $item_type,
+                    $item_id,
+                    $taxonomy,
+                    $mapped_fields,
+                    $apply_mode
+                );
+                $saved_count = count(array_filter($save_results, static function ($row) {
+                    return !empty($row['saved']);
+                }));
+            }
+        }
+
+        return [
+            'generationResultId' => $result['id'] ?? '',
+            'savedCount'         => $saved_count,
+        ];
+    }
+
+    public static function get_job_stats(array $job): array {
+        $stats = [
+            'total'      => count($job['items'] ?? []),
+            'completed'  => 0,
+            'processing' => 0,
+            'pending'    => 0,
+            'failed'     => 0,
+            'skipped'    => 0,
+            'saved'      => 0,
+        ];
+
+        foreach ($job['items'] ?? [] as $item) {
+            $status = $item['status'] ?? 'pending';
+            if (isset($stats[$status])) {
+                $stats[$status]++;
+            }
+            $stats['saved'] += (int) ($item['savedCount'] ?? 0);
+        }
+
+        return $stats;
+    }
+
+    private static function get_all_jobs(): array {
+        $jobs = get_option(self::OPTION_KEY, []);
+        return is_array($jobs) ? $jobs : [];
+    }
+
+    private static function save_job(array $job): void {
+        $jobs = self::get_all_jobs();
+        $jobs[$job['id']] = $job;
+
+        if (count($jobs) > self::MAX_JOBS) {
+            uasort($jobs, static function ($a, $b) {
+                return strcmp($b['updatedAt'] ?? '', $a['updatedAt'] ?? '');
+            });
+            $jobs = array_slice($jobs, 0, self::MAX_JOBS, true);
+        }
+
+        update_option(self::OPTION_KEY, $jobs, false);
     }
 }
