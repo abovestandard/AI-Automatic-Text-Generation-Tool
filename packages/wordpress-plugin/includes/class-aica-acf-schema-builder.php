@@ -164,6 +164,13 @@ class AICA_ACF_Schema_Builder {
 
     private static function field_is_generatable(array $field): bool {
         $type = $field['type'] ?? '';
+        $name = $field['name'] ?? '';
+        $path = $field['path'] ?? $name;
+
+        if ($name !== '' && self::is_excluded($path, $name)) {
+            return false;
+        }
+
         if (in_array($type, self::SKIP_TYPES, true)) {
             return false;
         }

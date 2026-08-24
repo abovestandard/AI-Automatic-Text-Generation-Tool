@@ -868,7 +868,7 @@
                 $('#aica-bulk-start').prop('disabled', false);
             }
         }).catch(function (err) {
-            alert('Bulk generation failed: ' + (err.message || 'Unknown error'));
+            alert('Bulk generation failed: ' + extractApiError(err));
             $('#aica-bulk-start').prop('disabled', false);
         });
     }
@@ -1126,6 +1126,7 @@
             $('#aica-bulk-retry').hide();
             $('#aica-bulk-preview').hide();
             $('#aica-bulk-preview-list').empty();
+            $('#aica-bulk-failed-list').hide().empty();
             $('#aica-bulk-status-message').hide().text('');
             pollBulkStatus();
             pollInterval = setInterval(pollBulkStatus, 2000);
