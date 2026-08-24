@@ -79,7 +79,15 @@ export async function generateContent(
   const prompt = rowToPrompt(promptRow);
   const model = resolveModelId(prompt.model || projectRow.default_model || 'gemini-3.6-flash');
 
-  const useAcfAuto = request.acfAuto && request.acfSchema?.outputFields?.length;
+  if (request.acfAuto && !request.acfSchema?.outputFields?.length) {
+    return errorResult(
+      resultId,
+      request,
+      'ACF Auto Mode is enabled but no generatable ACF fields were found. Check your ACF field group assignment.'
+    );
+  }
+
+  const useAcfAuto = Boolean(request.acfAuto && request.acfSchema?.outputFields?.length);
   const outputFields = useAcfAuto
     ? request.acfSchema!.outputFields
     : prompt.outputFields;
@@ -174,6 +182,8 @@ export async function generateContent(
       rawResponse,
       tokensUsed: completion.tokensUsed,
       createdAt: new Date().toISOString(),
+      acfAutoUsed: useAcfAuto,
+      acfFieldCount: useAcfAuto ? outputFields.length : undefined,
     };
 
     db.prepare(`

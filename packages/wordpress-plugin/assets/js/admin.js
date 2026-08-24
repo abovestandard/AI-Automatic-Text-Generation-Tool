@@ -331,6 +331,13 @@
         const $content = $panel.find('.aica-preview-content');
         $content.empty();
 
+        if (response.acfMeta) {
+            const mode = response.acfMeta.autoMode
+                ? `ACF Auto Mode: ${response.acfMeta.fieldCount} field(s) detected`
+                : 'Manual prompt mode (ACF Auto off or no fields found)';
+            $content.append(`<p class="aica-field-hint"><strong>${escapeHtml(mode)}</strong></p>`);
+        }
+
         const generated = response.result.generatedContent || {};
         for (const [key, value] of Object.entries(generated)) {
             const display = formatPreviewValue(value);
@@ -598,6 +605,13 @@
         const $preview = $('#aica-generate-preview');
         const $content = $('#aica-generate-preview-content');
         $content.empty();
+
+        if (response.acfMeta) {
+            const mode = response.acfMeta.autoMode
+                ? `ACF Auto Mode: ${response.acfMeta.fieldCount} field(s) — ${(response.acfMeta.fields || []).join(', ')}`
+                : 'Manual prompt mode';
+            $content.append(`<p class="aica-field-hint"><strong>${escapeHtml(mode)}</strong></p>`);
+        }
 
         const generated = response.result.generatedContent || {};
         for (const [key, value] of Object.entries(generated)) {

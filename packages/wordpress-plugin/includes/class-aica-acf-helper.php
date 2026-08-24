@@ -51,20 +51,38 @@ class AICA_ACF_Helper {
     private static function parse_fields(array $fields, string $prefix = ''): array {
         $result = [];
         foreach ($fields as $field) {
+            $type = $field['type'] ?? 'text';
+
+            // Tab/accordion are layout wrappers — recurse without adding to path
+            if (in_array($type, ['tab', 'accordion'], true) && !empty($field['sub_fields'])) {
+                $result = array_merge($result, self::parse_fields($field['sub_fields'], $prefix));
+                continue;
+            }
+
+            // Clone field — inline cloned sub-fields
+            if ($type === 'clone' && !empty($field['sub_fields'])) {
+                $clone_prefix = !empty($field['prefix_name']) && !empty($field['name'])
+                    ? ($prefix ? "{$prefix}.{$field['name']}" : $field['name'])
+                    : $prefix;
+                $result = array_merge($result, self::parse_fields($field['sub_fields'], $clone_prefix));
+                continue;
+            }
+
             if (empty($field['name'])) {
                 continue;
             }
+
             $path = $prefix ? "{$prefix}.{$field['name']}" : $field['name'];
             $entry = [
                 'name'  => $field['name'],
                 'label' => $field['label'] ?? $field['name'],
-                'type'  => $field['type'] ?? 'text',
+                'type'  => $type,
                 'path'  => $path,
             ];
 
-            if (in_array($field['type'], ['group', 'repeater', 'flexible_content'], true) && !empty($field['sub_fields'])) {
+            if (in_array($type, ['group', 'repeater', 'flexible_content'], true) && !empty($field['sub_fields'])) {
                 $entry['children'] = self::parse_fields($field['sub_fields'], $path);
-                if ($field['type'] === 'repeater') {
+                if ($type === 'repeater') {
                     $entry['isRepeater'] = true;
                 }
             }

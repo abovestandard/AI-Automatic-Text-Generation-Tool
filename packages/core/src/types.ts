@@ -118,6 +118,9 @@ export interface GenerationResult {
   error?: string;
   tokensUsed?: number;
   createdAt: string;
+  /** True when ACF Auto Mode supplied the output schema */
+  acfAutoUsed?: boolean;
+  acfFieldCount?: number;
 }
 
 export interface MappedField {

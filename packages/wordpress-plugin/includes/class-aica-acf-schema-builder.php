@@ -92,20 +92,6 @@ class AICA_ACF_Schema_Builder {
             return;
         }
 
-        if ($type === 'group' && !empty($field['children'])) {
-            $child_groups = array_values(array_filter(
-                $field['children'],
-                fn($c) => ($c['type'] ?? '') === 'group' && self::group_has_generatable($c)
-            ));
-
-            if (count($child_groups) > 1) {
-                foreach ($child_groups as $child) {
-                    self::add_group_target($child, $output_fields, $mappings, $schema_entries, $source_data);
-                }
-                return;
-            }
-        }
-
         if ($type === 'group' && self::group_has_generatable($field)) {
             self::add_group_target($field, $output_fields, $mappings, $schema_entries, $source_data);
             return;

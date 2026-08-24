@@ -169,13 +169,26 @@ class AICA_REST_API {
         ];
 
         $acf_auto = !empty($params['acfAuto']);
+        $acf_schema = null;
 
         if ($acf_auto) {
             $kind = $item_type === 'term' ? 'taxonomy' : 'post_type';
             $slug = $item_type === 'term' ? $taxonomy : get_post_type($item_id);
             if ($slug) {
+                $acf_schema = AICA_ACF_Schema_Builder::get_generatable_schema($kind, $slug, $source_data);
                 $payload['acfAuto']   = true;
-                $payload['acfSchema'] = AICA_ACF_Schema_Builder::get_generatable_schema($kind, $slug, $source_data);
+                $payload['acfSchema'] = $acf_schema;
+
+                if (empty($acf_schema['outputFields'])) {
+                    return new WP_REST_Response([
+                        'error' => sprintf(
+                            'ACF Auto Mode found 0 generatable fields for %s "%s". Check that your ACF field group is assigned to this taxonomy and contains text/wysiwyg fields.',
+                            $kind,
+                            $slug
+                        ),
+                        'acfSchema' => $acf_schema,
+                    ], 400);
+                }
             }
         }
 
@@ -190,6 +203,11 @@ class AICA_REST_API {
         return new WP_REST_Response([
             'result'            => $result,
             'fillInstructions'  => $fill_instructions,
+            'acfMeta'           => [
+                'autoMode'   => $acf_auto,
+                'fieldCount' => $acf_schema['fieldCount'] ?? 0,
+                'fields'     => array_column($acf_schema['outputFields'] ?? [], 'key'),
+            ],
         ]);
     }
 
