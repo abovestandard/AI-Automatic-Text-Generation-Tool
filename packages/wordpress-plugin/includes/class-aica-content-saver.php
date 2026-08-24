@@ -49,18 +49,14 @@ class AICA_Content_Saver {
     private static function save_post_field(int $post_id, $object_id, string $target_type, string $target_field, $value): bool {
         switch ($target_type) {
             case 'post_field':
-                $update = ['ID' => $post_id];
-                if ($target_field === 'post_title') {
-                    $update['post_title'] = $value;
-                } elseif ($target_field === 'post_content') {
-                    $update['post_content'] = $value;
-                } elseif ($target_field === 'post_excerpt') {
-                    $update['post_excerpt'] = $value;
-                } else {
-                    return false;
+                return self::update_post_core_field($post_id, $target_field, $value);
+
+            case 'gutenberg':
+                $field = $target_field !== '' ? $target_field : 'post_content';
+                if ($field !== 'post_content') {
+                    return (bool) update_post_meta($post_id, $field, $value);
                 }
-                $result = wp_update_post($update, true);
-                return !is_wp_error($result);
+                return self::update_post_core_field($post_id, 'post_content', self::prepare_gutenberg_content($value));
 
             case 'acf':
             case 'acf_nested':
@@ -138,11 +134,12 @@ class AICA_Content_Saver {
             return (bool) get_term_meta($item_id, $target_field, true);
         }
 
-        if ($target_type === 'post_field') {
+        if ($target_type === 'post_field' || $target_type === 'gutenberg') {
             $post = get_post($item_id);
             if (!$post) return false;
+            $field = $target_type === 'gutenberg' ? 'post_content' : $target_field;
             $map = ['post_title' => 'post_title', 'post_content' => 'post_content', 'post_excerpt' => 'post_excerpt'];
-            $prop = $map[$target_field] ?? '';
+            $prop = $map[$field] ?? '';
             return $prop && trim($post->$prop) !== '';
         }
         if (function_exists('get_field')) {
@@ -162,5 +159,83 @@ class AICA_Content_Saver {
             $data = $data[$part];
         }
         return $data;
+    }
+
+    private static function update_post_core_field(int $post_id, string $field, $value): bool {
+        $allowed = ['post_title', 'post_content', 'post_excerpt'];
+        if (!in_array($field, $allowed, true)) {
+            return false;
+        }
+
+        $string_value = is_string($value) ? $value : wp_json_encode($value);
+        $result = wp_update_post([
+            'ID'   => $post_id,
+            $field => $string_value,
+        ], true);
+
+        if (is_wp_error($result)) {
+            return false;
+        }
+
+        $post = get_post($post_id);
+        if (!$post) {
+            return false;
+        }
+
+        return trim((string) $post->$field) !== '';
+    }
+
+    /**
+     * Convert AI HTML/text into Gutenberg-compatible post_content markup.
+     */
+    public static function prepare_gutenberg_content($value): string {
+        if (!is_string($value)) {
+            $value = is_array($value) ? wp_json_encode($value) : (string) $value;
+        }
+
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+
+        if (strpos($value, '<!-- wp:') !== false) {
+            return $value;
+        }
+
+        if (function_exists('serialize_blocks') && function_exists('parse_blocks')) {
+            $blocks = parse_blocks($value);
+            $blocks = array_values(array_filter($blocks, static function ($block) {
+                if (!empty($block['blockName'])) {
+                    return true;
+                }
+                return trim(strip_tags($block['innerHTML'] ?? '')) !== '';
+            }));
+
+            if (!empty($blocks)) {
+                return serialize_blocks($blocks);
+            }
+
+            $paragraphs = preg_split('/\R{2,}/', wp_strip_all_tags($value)) ?: [];
+            $blocks = [];
+            foreach ($paragraphs as $paragraph) {
+                $paragraph = trim($paragraph);
+                if ($paragraph === '') {
+                    continue;
+                }
+                $blocks[] = [
+                    'blockName'    => 'core/paragraph',
+                    'attrs'        => [],
+                    'innerBlocks'  => [],
+                    'innerHTML'    => '<p>' . esc_html($paragraph) . '</p>',
+                    'innerContent' => ['<p>' . esc_html($paragraph) . '</p>'],
+                ];
+            }
+
+            if (!empty($blocks)) {
+                return serialize_blocks($blocks);
+            }
+        }
+
+        return wpautop(wp_kses_post($value));
     }
 }

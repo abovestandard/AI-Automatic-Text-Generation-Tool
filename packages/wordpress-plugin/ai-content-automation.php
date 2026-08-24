@@ -3,7 +3,7 @@
  * Plugin Name: AI Content Automation
  * Plugin URI: https://github.com/ai-content-automation
  * Description: Reusable AI-powered content generation tool that automatically generates and fills WordPress/ACF form fields.
- * Version: 1.4.5
+ * Version: 1.4.6
  * Author: AI Content Automation
  * License: GPL v2 or later
  * Text Domain: ai-content-automation

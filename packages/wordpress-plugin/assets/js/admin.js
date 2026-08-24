@@ -164,12 +164,34 @@
         },
 
         fillGutenberg(content) {
-            if (typeof wp !== 'undefined' && wp.data && wp.data.dispatch) {
-                const blocks = wp.blocks.parse(content);
-                wp.data.dispatch('core/block-editor').resetBlocks(blocks);
-                return true;
+            if (typeof wp === 'undefined' || !wp.data || !wp.data.dispatch || !wp.blocks) {
+                return false;
             }
-            return false;
+
+            const trimmed = (content || '').trim();
+            if (!trimmed) {
+                return false;
+            }
+
+            let blocks = [];
+            if (trimmed.indexOf('<!-- wp:') !== -1) {
+                blocks = wp.blocks.parse(trimmed);
+            } else if (typeof wp.blocks.rawHandler === 'function') {
+                blocks = wp.blocks.rawHandler({ HTML: trimmed });
+            } else if (/<[^>]+>/.test(trimmed)) {
+                blocks = wp.blocks.parse(trimmed);
+            } else {
+                blocks = trimmed.split(/\n{2,}/).filter(Boolean).map(function (paragraph) {
+                    return wp.blocks.createBlock('core/paragraph', { content: paragraph.trim() });
+                });
+            }
+
+            if (!blocks.length) {
+                return false;
+            }
+
+            wp.data.dispatch('core/block-editor').resetBlocks(blocks);
+            return true;
         },
 
         fillPostField(fieldName, value) {
@@ -290,6 +312,11 @@
             }).then(function (result) {
                 $btn.prop('disabled', false).text(config.strings.apply || 'Save to ACF Fields');
                 if (result.saved > 0) {
+                    mappedFields
+                        .filter(function (field) { return field.targetType === 'gutenberg'; })
+                        .forEach(function (field) {
+                            FieldFiller.fillGutenberg(field.value);
+                        });
                     alert(`Saved ${result.saved} of ${result.total} fields successfully. The page will reload to show updated values.`);
                     location.reload();
                 } else {
@@ -904,7 +931,7 @@
     function collectBulkItemFields($item) {
         const itemId = $item.data('item-id');
         const jobItem = (bulkJobData?.items || []).find(function (row) {
-            return row.id === itemId;
+            return String(row.id) === String(itemId);
         });
         if (!jobItem) return null;
 
@@ -1016,6 +1043,8 @@
             method: 'POST',
         }).then(function () {
             $('#aica-bulk-retry').hide();
+            $('#aica-bulk-preview').hide();
+            $('#aica-bulk-preview-list').empty();
             $('#aica-bulk-status-message').hide().text('');
             pollBulkStatus();
             pollInterval = setInterval(pollBulkStatus, 2000);
