@@ -92,6 +92,13 @@ export interface GenerationRequest {
   images?: ImageInput[];
   applyMode: ApplyMode;
   fieldMappings?: FieldMapping[];
+  /** When true, use acfSchema from WordPress instead of manual output fields/mappings. */
+  acfAuto?: boolean;
+  acfSchema?: {
+    outputFields: PromptOutputField[];
+    schemaInstruction: string;
+    mappings: Array<Pick<FieldMapping, 'aiOutputKey' | 'targetType' | 'targetField'>>;
+  };
 }
 
 export interface ImageInput {

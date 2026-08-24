@@ -556,11 +556,18 @@
   margin-top: 8px;
 }
 
-.aica-panel-image-preview img {
-  max-width: 100%;
-  max-height: 80px;
-  border-radius: 4px;
-  border: 1px solid var(--aica-border);
+.aica-acf-auto-label {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.aica-panel-acf-auto {
+    margin-bottom: 12px;
+}
+
+.aica-panel-acf-auto .checkbox-label {
+    font-size: 13px;
+    margin-bottom: 0;
 }
 
 /* ─── Notices ───────────────────────────────────────────── */

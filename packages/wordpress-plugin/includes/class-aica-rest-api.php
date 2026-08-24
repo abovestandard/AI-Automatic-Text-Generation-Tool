@@ -93,6 +93,19 @@ class AICA_REST_API {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route($namespace, '/acf-schema', [
+            'methods'             => 'GET',
+            'callback'            => [$this, 'get_acf_schema'],
+            'permission_callback' => [$this, 'check_permission'],
+            'args'                => [
+                'type' => ['required' => true, 'type' => 'string'],
+                'slug' => ['required' => true, 'type' => 'string'],
+                'itemId' => ['type' => 'integer', 'default' => 0],
+                'itemType' => ['type' => 'string', 'default' => 'term'],
+                'taxonomy' => ['type' => 'string', 'default' => ''],
+            ],
+        ]);
+
         register_rest_route($namespace, '/acf-fields', [
             'methods'             => 'GET',
             'callback'            => [$this, 'get_acf_fields'],
@@ -154,6 +167,17 @@ class AICA_REST_API {
             'images'     => $images,
             'applyMode'  => sanitize_text_field($params['applyMode'] ?? 'preview'),
         ];
+
+        $acf_auto = !empty($params['acfAuto']);
+
+        if ($acf_auto) {
+            $kind = $item_type === 'term' ? 'taxonomy' : 'post_type';
+            $slug = $item_type === 'term' ? $taxonomy : get_post_type($item_id);
+            if ($slug) {
+                $payload['acfAuto']   = true;
+                $payload['acfSchema'] = AICA_ACF_Schema_Builder::get_generatable_schema($kind, $slug, $source_data);
+            }
+        }
 
         $result = $client->generate($payload);
 
@@ -322,6 +346,31 @@ class AICA_REST_API {
 
         $items = AICA_Content_Registry::get_items($type, $slug, 200, $search);
         return new WP_REST_Response($items);
+    }
+
+    public function get_acf_schema(WP_REST_Request $request): WP_REST_Response {
+        $type = sanitize_text_field($request->get_param('type'));
+        $slug = sanitize_key($request->get_param('slug'));
+        $item_id   = (int) $request->get_param('itemId');
+        $item_type = sanitize_text_field($request->get_param('itemType') ?? 'term');
+        $taxonomy  = sanitize_text_field($request->get_param('taxonomy') ?? '');
+
+        if (!in_array($type, ['post_type', 'taxonomy'], true)) {
+            return new WP_REST_Response(['error' => 'Invalid type'], 400);
+        }
+
+        $source_data = [];
+        if ($item_id) {
+            if ($item_type === 'term' && $taxonomy) {
+                $source_data = AICA_Data_Collector::collect_term_data($item_id, $taxonomy);
+            } else {
+                $source_data = AICA_Data_Collector::collect_post_data($item_id);
+            }
+        }
+
+        return new WP_REST_Response(
+            AICA_ACF_Schema_Builder::get_generatable_schema($type, $slug, $source_data)
+        );
     }
 
     public function get_acf_fields(WP_REST_Request $request): WP_REST_Response {

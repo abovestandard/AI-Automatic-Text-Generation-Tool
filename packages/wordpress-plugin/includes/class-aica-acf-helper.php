@@ -178,6 +178,10 @@ class AICA_ACF_Helper {
     /**
      * Check whether a value was persisted (handles ACF false negatives).
      */
+    public static function verify_saved($saved, $expected): bool {
+        return self::value_was_saved($saved, $expected);
+    }
+
     private static function value_was_saved($saved, $expected): bool {
         if ($expected === null || $expected === '') {
             return false;

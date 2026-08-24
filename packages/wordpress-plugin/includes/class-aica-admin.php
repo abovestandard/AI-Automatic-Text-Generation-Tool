@@ -108,8 +108,14 @@ class AICA_Admin {
              data-taxonomy="<?php echo esc_attr($taxonomy); ?>">
             <h3><?php esc_html_e('AI Content Generation', 'ai-content-automation'); ?></h3>
 
+            <div class="aica-field aica-panel-acf-auto">
+                <label class="checkbox-label">
+                    <input type="checkbox" class="aica-panel-acf-auto-cb" checked />
+                    <?php esc_html_e('ACF Auto Mode', 'ai-content-automation'); ?>
+                </label>
+            </div>
+
             <div class="aica-field">
-                <label for="aica-prompt-select"><?php esc_html_e('Select Prompt', 'ai-content-automation'); ?></label>
                 <select id="aica-prompt-select" class="aica-prompt-select aica-select">
                     <option value=""><?php esc_html_e('Loading prompts...', 'ai-content-automation'); ?></option>
                 </select>
@@ -249,6 +255,13 @@ class AICA_Admin {
                         <h2><?php esc_html_e('Prompt & Options', 'ai-content-automation'); ?></h2>
                     </div>
                     <div class="aica-step-body aica-form-grid">
+                        <div class="aica-field aica-field-full">
+                            <label class="checkbox-label aica-acf-auto-label">
+                                <input type="checkbox" id="aica-acf-auto-mode" checked />
+                                <?php esc_html_e('ACF Auto Mode — read field structure from WordPress and auto-map (no manual mappings needed)', 'ai-content-automation'); ?>
+                            </label>
+                            <p class="aica-field-hint" id="aica-acf-auto-hint"></p>
+                        </div>
                         <div class="aica-field aica-field-full">
                             <label for="aica-generate-prompt"><?php esc_html_e('Select Prompt', 'ai-content-automation'); ?></label>
                             <select id="aica-generate-prompt" class="aica-select">

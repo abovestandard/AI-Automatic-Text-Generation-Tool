@@ -79,8 +79,15 @@ export async function generateContent(
   const prompt = rowToPrompt(promptRow);
   const model = resolveModelId(prompt.model || projectRow.default_model || 'gemini-3.6-flash');
 
+  const useAcfAuto = request.acfAuto && request.acfSchema?.outputFields?.length;
+  const outputFields = useAcfAuto
+    ? request.acfSchema!.outputFields
+    : prompt.outputFields;
+
   const renderedUserPrompt = renderTemplate(prompt.userPromptTemplate, request.sourceData);
-  const schemaInstruction = buildOutputSchemaInstruction(prompt.outputFields);
+  const schemaInstruction = useAcfAuto
+    ? request.acfSchema!.schemaInstruction
+    : buildOutputSchemaInstruction(prompt.outputFields);
   const fullUserPrompt = `${renderedUserPrompt}\n\n${schemaInstruction}`;
 
   const images = prompt.supportsVision && request.images?.length
@@ -137,10 +144,23 @@ export async function generateContent(
       termTaxonomy: r.term_taxonomy ?? undefined,
     }));
 
+    const autoMappings: FieldMapping[] = useAcfAuto
+      ? (request.acfSchema!.mappings ?? []).map((m, i) => ({
+          id: `acf-auto-${i}`,
+          projectId: request.projectId,
+          promptId: request.promptId,
+          aiOutputKey: m.aiOutputKey,
+          targetType: m.targetType as FieldMapping['targetType'],
+          targetField: m.targetField,
+        }))
+      : [];
+
+    const activeMappings = request.fieldMappings
+      ?? (autoMappings.length ? autoMappings : mappings);
     const existingValues = extractExistingValues(request.sourceData);
     const mappedFields = mapGeneratedContent(
       generatedContent,
-      request.fieldMappings || mappings,
+      activeMappings,
       existingValues,
       request.applyMode
     );

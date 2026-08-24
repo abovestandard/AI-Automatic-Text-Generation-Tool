@@ -243,6 +243,7 @@
                     promptId,
                     applyMode,
                     uploadedImages: getUploadedImages(),
+                    acfAuto: $panel.find('.aica-panel-acf-auto-cb').is(':checked'),
                 },
             }).then(function (response) {
                 currentResult = response;
@@ -463,7 +464,43 @@
             } else {
                 $editLink.hide();
             }
+            if ($('#aica-acf-auto-mode').is(':checked')) {
+                loadAcfAutoHint();
+            }
         });
+
+        $contentType.on('change', function () {
+            $('#aica-acf-auto-hint').text('');
+        });
+
+        $('#aica-acf-auto-mode').on('change', loadAcfAutoHint);
+
+        function loadAcfAutoHint() {
+            const contentType = $contentType.val();
+            const parsed = parseContentType(contentType);
+            const itemId = parseInt($contentItem.val(), 10);
+            if (!parsed || !$('#aica-acf-auto-mode').is(':checked')) {
+                $('#aica-acf-auto-hint').text('');
+                return;
+            }
+            const itemType = getItemTypeFromKind(parsed.kind);
+            const taxonomy = parsed.kind === 'taxonomy' ? parsed.slug : '';
+            let path = `/ai-content/v1/acf-schema?type=${encodeURIComponent(parsed.kind)}&slug=${encodeURIComponent(parsed.slug)}`;
+            if (itemId) {
+                path += `&itemId=${itemId}&itemType=${encodeURIComponent(itemType)}&taxonomy=${encodeURIComponent(taxonomy)}`;
+            }
+            $('#aica-acf-auto-hint').text('Loading ACF fields...');
+            wp.apiFetch({ path }).then(function (schema) {
+                const count = schema.fieldCount || (schema.outputFields || []).length;
+                $('#aica-acf-auto-hint').text(
+                    count
+                        ? `${count} ACF section(s) will be auto-detected and mapped.`
+                        : 'No generatable ACF fields found for this content type.'
+                );
+            }).catch(function () {
+                $('#aica-acf-auto-hint').text('');
+            });
+        }
 
         $generateBtn.on('click', function () {
             const contentType = $contentType.val();
@@ -494,6 +531,7 @@
                     promptId,
                     applyMode,
                     uploadedImages: getUploadedImages(),
+                    acfAuto: $('#aica-acf-auto-mode').is(':checked'),
                 },
             }).then(function (response) {
                 $('#aica-generate-status').hide();
