@@ -15,13 +15,17 @@ class AICA_Bulk_Processor {
         $items = AICA_Content_Registry::get_items($parsed['kind'], $parsed['slug'], $limit);
 
         return array_map(function ($item) use ($parsed) {
+            $item_type = $parsed['kind'] === 'taxonomy' ? 'term' : 'post';
+            $taxonomy  = $parsed['kind'] === 'taxonomy' ? $parsed['slug'] : '';
+
             return [
                 'itemId'    => $item['id'],
-                'itemType'  => $parsed['kind'] === 'taxonomy' ? 'term' : 'post',
+                'itemType'  => $item_type,
                 'itemLabel' => $item['label'],
-                'taxonomy'  => $parsed['kind'] === 'taxonomy' ? $parsed['slug'] : '',
+                'taxonomy'  => $taxonomy,
                 'postType'  => $parsed['kind'] === 'post_type' ? $parsed['slug'] : '',
                 'status'    => $item['status'] ?? '',
+                'editUrl'   => $item['editUrl'] ?? '',
             ];
         }, $items);
     }
@@ -36,16 +40,18 @@ class AICA_Bulk_Processor {
                 'itemLabel'   => sanitize_text_field($item['itemLabel'] ?? ''),
                 'taxonomy'    => sanitize_text_field($item['taxonomy'] ?? ''),
                 'postType'    => sanitize_text_field($item['postType'] ?? ''),
+                'editUrl'     => esc_url_raw($item['editUrl'] ?? ''),
                 'status'      => 'pending',
                 'retryCount'  => 0,
                 'savedCount'  => 0,
+                'applied'     => false,
             ];
         }
 
         $job = [
             'id'        => wp_generate_uuid4(),
             'promptId'  => sanitize_text_field($params['promptId'] ?? ''),
-            'applyMode' => sanitize_text_field($params['applyMode'] ?? 'empty_only'),
+            'applyMode' => sanitize_text_field($params['applyMode'] ?? 'preview'),
             'acfAuto'   => !empty($params['acfAuto']),
             'name'      => sanitize_text_field($params['name'] ?? 'Bulk Generation'),
             'status'    => 'queued',
@@ -114,8 +120,11 @@ class AICA_Bulk_Processor {
 
             $job['items'][$next_index]['status']              = 'completed';
             $job['items'][$next_index]['generationResultId']  = $result['generationResultId'] ?? '';
-            $job['items'][$next_index]['savedCount']            = $result['savedCount'] ?? 0;
-            $job['items'][$next_index]['error']                 = '';
+            $job['items'][$next_index]['savedCount']          = $result['savedCount'] ?? 0;
+            $job['items'][$next_index]['generatedContent']    = $result['generatedContent'] ?? [];
+            $job['items'][$next_index]['mappedFields']        = $result['mappedFields'] ?? [];
+            $job['items'][$next_index]['applied']             = $result['applied'] ?? false;
+            $job['items'][$next_index]['error']               = '';
         } catch (Exception $e) {
             $job = self::get_job($job_id);
             if (!$job) {
@@ -148,6 +157,51 @@ class AICA_Bulk_Processor {
         self::save_job($job);
 
         return $job;
+    }
+
+    public static function apply_item(string $job_id, string $item_uuid, array $mapped_fields, string $save_mode = 'replace'): array {
+        $job = self::get_job($job_id);
+        if (!$job) {
+            throw new Exception('Bulk job not found.');
+        }
+
+        $index = null;
+        foreach ($job['items'] as $i => $item) {
+            if (($item['id'] ?? '') === $item_uuid) {
+                $index = $i;
+                break;
+            }
+        }
+
+        if ($index === null) {
+            throw new Exception('Bulk item not found.');
+        }
+
+        $item = $job['items'][$index];
+        $results = AICA_Content_Saver::save_mapped_fields(
+            $item['itemType'] ?? 'term',
+            (int) ($item['itemId'] ?? 0),
+            $item['taxonomy'] ?? '',
+            $mapped_fields,
+            $save_mode
+        );
+
+        $saved_count = count(array_filter($results, static function ($row) {
+            return !empty($row['saved']);
+        }));
+
+        $job['items'][$index]['mappedFields'] = $mapped_fields;
+        $job['items'][$index]['savedCount']   = $saved_count;
+        $job['items'][$index]['applied']       = $saved_count > 0;
+        $job['updatedAt']                     = current_time('c');
+        self::save_job($job);
+
+        return [
+            'saved'   => $saved_count,
+            'total'   => count($results),
+            'results' => $results,
+            'item'    => $job['items'][$index],
+        ];
     }
 
     public static function retry_failed(string $job_id): ?array {
@@ -228,9 +282,10 @@ class AICA_Bulk_Processor {
 
         $saved_count = 0;
         $apply_mode  = $job['applyMode'] ?? 'preview';
+        $mapped_fields = $result['mappedFields'] ?? [];
+        $applied = false;
 
         if (!in_array($apply_mode, ['preview', 'generate_only'], true)) {
-            $mapped_fields = $result['mappedFields'] ?? [];
             if (!empty($mapped_fields)) {
                 $save_results = AICA_Content_Saver::save_mapped_fields(
                     $item_type,
@@ -242,12 +297,16 @@ class AICA_Bulk_Processor {
                 $saved_count = count(array_filter($save_results, static function ($row) {
                     return !empty($row['saved']);
                 }));
+                $applied = $saved_count > 0;
             }
         }
 
         return [
             'generationResultId' => $result['id'] ?? '',
             'savedCount'         => $saved_count,
+            'generatedContent'   => $result['generatedContent'] ?? [],
+            'mappedFields'       => $mapped_fields,
+            'applied'            => $applied,
         ];
     }
 
@@ -260,6 +319,8 @@ class AICA_Bulk_Processor {
             'failed'     => 0,
             'skipped'    => 0,
             'saved'      => 0,
+            'applied'    => 0,
+            'awaiting'   => 0,
         ];
 
         foreach ($job['items'] ?? [] as $item) {
@@ -268,6 +329,11 @@ class AICA_Bulk_Processor {
                 $stats[$status]++;
             }
             $stats['saved'] += (int) ($item['savedCount'] ?? 0);
+            if (!empty($item['applied'])) {
+                $stats['applied']++;
+            } elseif (($item['status'] ?? '') === 'completed' && !empty($item['mappedFields'])) {
+                $stats['awaiting']++;
+            }
         }
 
         return $stats;

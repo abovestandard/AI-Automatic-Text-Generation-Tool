@@ -641,11 +641,18 @@
 
     // ─── Bulk Processing ────────────────────────────────────
 
+    let bulkJobId = null;
+    let bulkJobData = null;
+    let pollInterval = null;
+
     function initBulkPage() {
         const $page = $('.aica-bulk-page');
         if (!$page.length) return;
 
         loadPrompts($('#aica-bulk-prompt'));
+
+        $('#aica-bulk-apply-mode').on('change', updateBulkApplyHint);
+        updateBulkApplyHint();
 
         $('#aica-bulk-load-items').on('click', function () {
             const contentType = $('#aica-bulk-content-type').val();
@@ -656,8 +663,10 @@
             loadBulkItems(contentType);
         });
 
-        $('#aica-bulk-select-all').on('change', function () {
-            $('#aica-bulk-items-tbody input[type="checkbox"]').prop('checked', this.checked);
+        $('#aica-bulk-select-all, #aica-bulk-select-all-header').on('change', function () {
+            const checked = this.checked;
+            $('#aica-bulk-select-all, #aica-bulk-select-all-header').prop('checked', checked);
+            $('#aica-bulk-items-tbody input[type="checkbox"]').prop('checked', checked);
             updateBulkStartButton();
         });
 
@@ -665,6 +674,25 @@
 
         $('#aica-bulk-start').on('click', startBulkGeneration);
         $('#aica-bulk-retry').on('click', retryBulkJob);
+        $('#aica-bulk-apply-all').on('click', applyAllBulkItems);
+
+        $(document).on('click', '.aica-bulk-toggle-preview', function () {
+            $(this).closest('.aica-bulk-preview-item').toggleClass('is-open');
+        });
+
+        $(document).on('click', '.aica-bulk-apply-item', function () {
+            applyBulkItem($(this).closest('.aica-bulk-preview-item'));
+        });
+    }
+
+    function updateBulkApplyHint() {
+        const mode = $('#aica-bulk-apply-mode').val();
+        const hints = {
+            preview: 'Review generated content before saving to WordPress.',
+            empty_only: 'Automatically saves only empty ACF fields after generation.',
+            replace: 'Automatically replaces existing field content after generation.',
+        };
+        $('#aica-bulk-apply-hint').text(hints[mode] || '');
     }
 
     function loadBulkItems(contentType) {
@@ -679,11 +707,14 @@
             (items || []).forEach(function (item) {
                 $tbody.append(
                     `<tr>
-                        <td><input type="checkbox" value="${item.itemId}"
-                            data-label="${escapeHtml(item.itemLabel)}"
-                            data-type="${item.itemType}"
-                            data-taxonomy="${escapeHtml(item.taxonomy || '')}"
-                            data-post-type="${escapeHtml(item.postType || '')}" /></td>
+                        <th scope="row" class="check-column">
+                            <input type="checkbox" value="${item.itemId}"
+                                data-label="${escapeHtml(item.itemLabel)}"
+                                data-type="${item.itemType}"
+                                data-taxonomy="${escapeHtml(item.taxonomy || '')}"
+                                data-post-type="${escapeHtml(item.postType || '')}"
+                                data-edit-url="${escapeHtml(item.editUrl || '')}" />
+                        </th>
                         <td>${escapeHtml(item.itemLabel)}</td>
                         <td>${escapeHtml(item.status || '')}</td>
                     </tr>`
@@ -707,9 +738,6 @@
         $('#aica-bulk-start').prop('disabled', checked === 0);
     }
 
-    let bulkJobId = null;
-    let pollInterval = null;
-
     function startBulkGeneration() {
         const promptId = $('#aica-bulk-prompt').val();
         const applyMode = $('#aica-bulk-apply-mode').val();
@@ -719,19 +747,23 @@
         const items = [];
         $('#aica-bulk-items-tbody input:checked').each(function () {
             items.push({
-                itemId: parseInt($(this).val()),
+                itemId: parseInt($(this).val(), 10),
                 itemType: $(this).data('type') || 'term',
                 itemLabel: $(this).data('label'),
                 taxonomy: $(this).data('taxonomy') || 'category',
                 postType: $(this).data('post-type') || '',
+                editUrl: $(this).data('edit-url') || '',
             });
         });
 
         $('#aica-bulk-start').prop('disabled', true);
         $('#aica-bulk-progress').show();
+        $('#aica-bulk-preview').hide();
+        $('#aica-bulk-preview-list').empty();
         $('#aica-bulk-status-message').hide().text('');
         $('#aica-stat-completed, #aica-stat-processing, #aica-stat-pending, #aica-stat-failed, #aica-stat-saved').text('0');
         $('.aica-progress-fill').css('width', '0%');
+        bulkJobData = null;
 
         wp.apiFetch({
             path: '/ai-content/v1/bulk/generate',
@@ -762,6 +794,7 @@
         if (!bulkJobId) return;
         wp.apiFetch({ path: `/ai-content/v1/bulk/status/${bulkJobId}` })
             .then(function (job) {
+                bulkJobData = job;
                 const stats = job.stats || {};
                 $('#aica-stat-completed').text(stats.completed || 0);
                 $('#aica-stat-processing').text(stats.processing || 0);
@@ -778,17 +811,21 @@
                     pollInterval = null;
                     $('#aica-bulk-start').prop('disabled', false);
 
-                    const applyMode = $('#aica-bulk-apply-mode').val();
+                    const applyMode = job.applyMode || $('#aica-bulk-apply-mode').val();
                     let message = `Bulk generation completed: ${stats.completed || 0} of ${stats.total || 0} items processed.`;
+
                     if (applyMode === 'preview') {
-                        message += ' No fields were saved because "Generate Only" mode was selected.';
+                        message += ` ${stats.awaiting || 0} item(s) ready for review.`;
+                        showBulkPreview(job);
                     } else {
                         message += ` ${stats.saved || 0} field(s) saved to WordPress.`;
                     }
+
                     if (stats.failed > 0) {
                         message += ` ${stats.failed} item(s) failed.`;
                         $('#aica-bulk-retry').show();
                     }
+
                     $('#aica-bulk-status-message').text(message).show();
                 }
             })
@@ -800,6 +837,178 @@
             });
     }
 
+    function showBulkPreview(job) {
+        const $list = $('#aica-bulk-preview-list');
+        $list.empty();
+
+        const items = (job.items || []).filter(function (item) {
+            return item.status === 'completed' && (item.mappedFields || []).length > 0;
+        });
+
+        if (!items.length) {
+            $list.append('<p class="aica-empty-state">No generated content available for review.</p>');
+            $('#aica-bulk-preview').show();
+            return;
+        }
+
+        items.forEach(function (item) {
+            const badge = item.applied
+                ? '<span class="aica-bulk-badge applied">Applied</span>'
+                : '<span class="aica-bulk-badge ready">Ready to apply</span>';
+
+            const editLink = item.editUrl
+                ? `<a href="${escapeHtml(item.editUrl)}" class="button button-small" target="_blank" rel="noopener">Edit in WordPress</a>`
+                : '';
+
+            $list.append(
+                `<div class="aica-bulk-preview-item${item.applied ? ' is-applied' : ''}" data-item-id="${escapeHtml(item.id)}">
+                    <div class="aica-bulk-preview-item-header">
+                        <div>
+                            <h3>${escapeHtml(item.itemLabel || ('Item ' + item.itemId))}</h3>
+                            ${badge}
+                        </div>
+                        <div class="aica-bulk-preview-item-actions">
+                            <button type="button" class="button button-small aica-bulk-toggle-preview">Preview</button>
+                            <button type="button" class="button button-primary button-small aica-bulk-apply-item"${item.applied ? ' disabled' : ''}>
+                                ${item.applied ? 'Applied' : 'Apply to WordPress'}
+                            </button>
+                            ${editLink}
+                        </div>
+                    </div>
+                    <div class="aica-bulk-preview-item-body">
+                        ${renderBulkPreviewFields(item)}
+                    </div>
+                </div>`
+            );
+        });
+
+        $('#aica-bulk-preview').show();
+        $('html, body').animate({ scrollTop: $('#aica-bulk-preview').offset().top - 40 }, 300);
+    }
+
+    function renderBulkPreviewFields(item) {
+        const fields = item.mappedFields || [];
+        if (!fields.length) {
+            return '<p class="aica-field-hint">No mapped fields.</p>';
+        }
+
+        return fields.map(function (field, index) {
+            const value = formatPreviewValue(field.value || '');
+            return `<div class="aica-bulk-preview-field" data-field-index="${index}">
+                <strong>${escapeHtml(field.aiOutputKey)} → ${escapeHtml(field.targetField)}</strong>
+                <textarea class="aica-bulk-field-value" rows="4">${escapeHtml(value)}</textarea>
+            </div>`;
+        }).join('');
+    }
+
+    function collectBulkItemFields($item) {
+        const itemId = $item.data('item-id');
+        const jobItem = (bulkJobData?.items || []).find(function (row) {
+            return row.id === itemId;
+        });
+        if (!jobItem) return null;
+
+        const mappedFields = (jobItem.mappedFields || []).map(function (field, index) {
+            const $textarea = $item.find(`.aica-bulk-preview-field[data-field-index="${index}"] textarea`);
+            return Object.assign({}, field, {
+                value: $textarea.length ? $textarea.val() : field.value,
+            });
+        });
+
+        return {
+            item: jobItem,
+            mappedFields,
+        };
+    }
+
+    function applyBulkItem($item) {
+        const payload = collectBulkItemFields($item);
+        if (!payload) return;
+
+        const $btn = $item.find('.aica-bulk-apply-item');
+        $btn.prop('disabled', true).text('Applying...');
+
+        wp.apiFetch({
+            path: '/ai-content/v1/bulk/apply-item',
+            method: 'POST',
+            data: {
+                jobId: bulkJobId,
+                itemId: payload.item.id,
+                mappedFields: payload.mappedFields,
+                saveMode: 'replace',
+            },
+        }).then(function (result) {
+            if (result.saved > 0) {
+                $item.addClass('is-applied');
+                $item.find('.aica-bulk-badge').removeClass('ready').addClass('applied').text('Applied');
+                $btn.text('Applied');
+            } else {
+                $btn.prop('disabled', false).text('Apply to WordPress');
+                alert('No fields were saved. Check field mappings and values.');
+            }
+
+            if (bulkJobData && bulkJobData.items) {
+                bulkJobData.items = bulkJobData.items.map(function (row) {
+                    return row.id === payload.item.id ? Object.assign({}, row, result.item || {}) : row;
+                });
+            }
+        }).catch(function (err) {
+            $btn.prop('disabled', false).text('Apply to WordPress');
+            alert('Apply failed: ' + (err.message || 'Unknown error'));
+        });
+    }
+
+    function applyAllBulkItems() {
+        const $items = $('.aica-bulk-preview-item').not('.is-applied');
+        if (!$items.length) {
+            alert('All items have already been applied.');
+            return;
+        }
+
+        $('#aica-bulk-apply-all').prop('disabled', true).text('Applying...');
+        let index = 0;
+
+        function applyNext() {
+            if (index >= $items.length) {
+                $('#aica-bulk-apply-all').prop('disabled', false).text('Apply All to WordPress');
+                alert('Finished applying all items.');
+                return;
+            }
+
+            const $item = $($items[index]);
+            const payload = collectBulkItemFields($item);
+            if (!payload) {
+                index += 1;
+                applyNext();
+                return;
+            }
+
+            wp.apiFetch({
+                path: '/ai-content/v1/bulk/apply-item',
+                method: 'POST',
+                data: {
+                    jobId: bulkJobId,
+                    itemId: payload.item.id,
+                    mappedFields: payload.mappedFields,
+                    saveMode: 'replace',
+                },
+            }).then(function (result) {
+                if (result.saved > 0) {
+                    $item.addClass('is-applied');
+                    $item.find('.aica-bulk-badge').removeClass('ready').addClass('applied').text('Applied');
+                    $item.find('.aica-bulk-apply-item').prop('disabled', true).text('Applied');
+                }
+                index += 1;
+                applyNext();
+            }).catch(function (err) {
+                $('#aica-bulk-apply-all').prop('disabled', false).text('Apply All to WordPress');
+                alert('Apply failed on item ' + (payload.item.itemLabel || payload.item.itemId) + ': ' + (err.message || 'Unknown error'));
+            });
+        }
+
+        applyNext();
+    }
+
     function retryBulkJob() {
         if (!bulkJobId) return;
         wp.apiFetch({
@@ -807,7 +1016,11 @@
             method: 'POST',
         }).then(function () {
             $('#aica-bulk-retry').hide();
+            $('#aica-bulk-status-message').hide().text('');
+            pollBulkStatus();
             pollInterval = setInterval(pollBulkStatus, 2000);
+        }).catch(function (err) {
+            alert('Retry failed: ' + (err.message || 'Unknown error'));
         });
     }
 

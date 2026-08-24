@@ -76,6 +76,12 @@ class AICA_REST_API {
             'permission_callback' => [$this, 'check_permission'],
         ]);
 
+        register_rest_route($namespace, '/bulk/apply-item', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'bulk_apply_item'],
+            'permission_callback' => [$this, 'check_permission'],
+        ]);
+
         register_rest_route($namespace, '/content-types', [
             'methods'             => 'GET',
             'callback'            => [$this, 'get_content_types'],
@@ -322,12 +328,38 @@ class AICA_REST_API {
             'id'          => $job['id'],
             'status'      => $job['status'],
             'applyMode'   => $job['applyMode'],
+            'acfAuto'     => !empty($job['acfAuto']),
             'items'       => $job['items'],
             'createdAt'   => $job['createdAt'],
             'updatedAt'   => $job['updatedAt'],
             'completedAt' => $job['completedAt'] ?? null,
             'stats'       => AICA_Bulk_Processor::get_job_stats($job),
         ]);
+    }
+
+    public function bulk_apply_item(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $job_id = sanitize_text_field($params['jobId'] ?? '');
+        $item_id = sanitize_text_field($params['itemId'] ?? '');
+        $mapped_fields = $params['mappedFields'] ?? [];
+        $save_mode = sanitize_text_field($params['saveMode'] ?? 'replace');
+
+        if ($job_id === '' || $item_id === '') {
+            return new WP_REST_Response(['error' => 'Job ID and item ID are required.'], 400);
+        }
+
+        try {
+            $result = AICA_Bulk_Processor::apply_item($job_id, $item_id, $mapped_fields, $save_mode);
+            return new WP_REST_Response([
+                'success' => true,
+                'saved'   => $result['saved'],
+                'total'   => $result['total'],
+                'results' => $result['results'],
+                'item'    => $result['item'],
+            ]);
+        } catch (Exception $e) {
+            return new WP_REST_Response(['error' => $e->getMessage()], 400);
+        }
     }
 
     public function bulk_retry(WP_REST_Request $request): WP_REST_Response {

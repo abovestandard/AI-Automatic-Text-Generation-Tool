@@ -410,71 +410,86 @@ class AICA_Admin {
 
             <?php $this->render_config_notice(); ?>
 
-            <div class="aica-bulk-config">
-                <div class="aica-field">
-                    <label for="aica-bulk-content-type"><?php esc_html_e('Content Type', 'ai-content-automation'); ?></label>
-                    <select id="aica-bulk-content-type">
-                        <option value=""><?php esc_html_e('Select post type or taxonomy...', 'ai-content-automation'); ?></option>
-                        <?php if (!empty($content_types['postTypes'])) : ?>
-                            <optgroup label="<?php esc_attr_e('Post Types', 'ai-content-automation'); ?>">
-                                <?php foreach ($content_types['postTypes'] as $pt) : ?>
-                                    <option value="post_type:<?php echo esc_attr($pt['slug']); ?>">
-                                        <?php echo esc_html($pt['name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </optgroup>
-                        <?php endif; ?>
-                        <?php if (!empty($content_types['taxonomies'])) : ?>
-                            <optgroup label="<?php esc_attr_e('Taxonomies', 'ai-content-automation'); ?>">
-                                <?php foreach ($content_types['taxonomies'] as $tax) : ?>
-                                    <option value="taxonomy:<?php echo esc_attr($tax['slug']); ?>">
-                                        <?php echo esc_html($tax['name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </optgroup>
-                        <?php endif; ?>
-                    </select>
+            <div class="aica-bulk-setup card-like">
+                <div class="aica-step-header">
+                    <span class="aica-step-num">1</span>
+                    <h2><?php esc_html_e('Configuration', 'ai-content-automation'); ?></h2>
                 </div>
+                <div class="aica-step-body aica-form-grid">
+                    <div class="aica-field">
+                        <label for="aica-bulk-content-type"><?php esc_html_e('Content Type', 'ai-content-automation'); ?></label>
+                        <select id="aica-bulk-content-type" class="aica-select">
+                            <option value=""><?php esc_html_e('Select post type or taxonomy...', 'ai-content-automation'); ?></option>
+                            <?php if (!empty($content_types['postTypes'])) : ?>
+                                <optgroup label="<?php esc_attr_e('Post Types', 'ai-content-automation'); ?>">
+                                    <?php foreach ($content_types['postTypes'] as $pt) : ?>
+                                        <option value="post_type:<?php echo esc_attr($pt['slug']); ?>">
+                                            <?php echo esc_html($pt['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                            <?php endif; ?>
+                            <?php if (!empty($content_types['taxonomies'])) : ?>
+                                <optgroup label="<?php esc_attr_e('Taxonomies', 'ai-content-automation'); ?>">
+                                    <?php foreach ($content_types['taxonomies'] as $tax) : ?>
+                                        <option value="taxonomy:<?php echo esc_attr($tax['slug']); ?>">
+                                            <?php echo esc_html($tax['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                            <?php endif; ?>
+                        </select>
+                    </div>
 
-                <div class="aica-field">
-                    <label><?php esc_html_e('Select Prompt', 'ai-content-automation'); ?></label>
-                    <select id="aica-bulk-prompt">
-                        <option value=""><?php esc_html_e('Loading...', 'ai-content-automation'); ?></option>
-                    </select>
+                    <div class="aica-field">
+                        <label for="aica-bulk-prompt"><?php esc_html_e('Select Prompt', 'ai-content-automation'); ?></label>
+                        <select id="aica-bulk-prompt" class="aica-select">
+                            <option value=""><?php esc_html_e('Loading...', 'ai-content-automation'); ?></option>
+                        </select>
+                    </div>
+
+                    <div class="aica-field">
+                        <label for="aica-bulk-apply-mode"><?php esc_html_e('Apply Mode', 'ai-content-automation'); ?></label>
+                        <select id="aica-bulk-apply-mode" class="aica-select">
+                            <option value="preview"><?php esc_html_e('Generate & Preview', 'ai-content-automation'); ?></option>
+                            <option value="empty_only"><?php esc_html_e('Fill Empty Fields Only', 'ai-content-automation'); ?></option>
+                            <option value="replace"><?php esc_html_e('Replace Existing Content', 'ai-content-automation'); ?></option>
+                        </select>
+                        <p class="aica-field-hint" id="aica-bulk-apply-hint">
+                            <?php esc_html_e('Review generated content before saving to WordPress.', 'ai-content-automation'); ?>
+                        </p>
+                    </div>
+
+                    <div class="aica-field">
+                        <label class="checkbox-label aica-acf-auto-label" for="aica-bulk-acf-auto">
+                            <input type="checkbox" id="aica-bulk-acf-auto" checked />
+                            <?php esc_html_e('ACF Auto Mode', 'ai-content-automation'); ?>
+                        </label>
+                        <p class="aica-field-hint">
+                            <?php esc_html_e('Automatically detect and map ACF fields for each item.', 'ai-content-automation'); ?>
+                        </p>
+                    </div>
+
+                    <div class="aica-field aica-field-full aica-bulk-load-row">
+                        <button type="button" class="button button-secondary" id="aica-bulk-load-items">
+                            <?php esc_html_e('Load Items', 'ai-content-automation'); ?>
+                        </button>
+                    </div>
                 </div>
-
-                <div class="aica-field">
-                    <label><?php esc_html_e('Apply Mode', 'ai-content-automation'); ?></label>
-                    <select id="aica-bulk-apply-mode">
-                        <option value="empty_only"><?php esc_html_e('Fill Empty Fields Only', 'ai-content-automation'); ?></option>
-                        <option value="replace"><?php esc_html_e('Replace Existing Content', 'ai-content-automation'); ?></option>
-                        <option value="preview"><?php esc_html_e('Generate Only (no save)', 'ai-content-automation'); ?></option>
-                    </select>
-                    <p class="description"><?php esc_html_e('Bulk generation saves directly to WordPress for all modes except "Generate Only".', 'ai-content-automation'); ?></p>
-                </div>
-
-                <div class="aica-field">
-                    <label>
-                        <input type="checkbox" id="aica-bulk-acf-auto" checked />
-                        <?php esc_html_e('ACF Auto Mode', 'ai-content-automation'); ?>
-                    </label>
-                    <p class="description"><?php esc_html_e('Automatically detect and map ACF fields for each item.', 'ai-content-automation'); ?></p>
-                </div>
-
-                <button type="button" class="button" id="aica-bulk-load-items">
-                    <?php esc_html_e('Load Items', 'ai-content-automation'); ?>
-                </button>
             </div>
 
-            <div id="aica-bulk-items-list" style="display:none;">
-                <h2><?php esc_html_e('Select Items', 'ai-content-automation'); ?></h2>
-                <p>
+            <div id="aica-bulk-items-list" class="card-like" style="display:none;">
+                <div class="aica-step-header">
+                    <span class="aica-step-num">2</span>
+                    <h2><?php esc_html_e('Select Items', 'ai-content-automation'); ?></h2>
+                </div>
+                <p class="aica-bulk-select-all-row">
                     <label><input type="checkbox" id="aica-bulk-select-all" /> <?php esc_html_e('Select All', 'ai-content-automation'); ?></label>
                 </p>
-                <table class="wp-list-table widefat fixed striped">
+                <table class="wp-list-table widefat fixed striped aica-bulk-table">
                     <thead>
                         <tr>
-                            <th class="check-column"><input type="checkbox" /></th>
+                            <td class="check-column"><input type="checkbox" id="aica-bulk-select-all-header" /></td>
                             <th><?php esc_html_e('Name', 'ai-content-automation'); ?></th>
                             <th><?php esc_html_e('Status', 'ai-content-automation'); ?></th>
                         </tr>
@@ -482,15 +497,18 @@ class AICA_Admin {
                     <tbody id="aica-bulk-items-tbody"></tbody>
                 </table>
 
-                <div class="aica-bulk-actions" style="margin-top: 20px;">
-                    <button type="button" class="button button-primary" id="aica-bulk-start" disabled>
+                <div class="aica-bulk-actions">
+                    <button type="button" class="button button-primary button-hero" id="aica-bulk-start" disabled>
                         <?php esc_html_e('Start Bulk Generation', 'ai-content-automation'); ?>
                     </button>
                 </div>
             </div>
 
-            <div id="aica-bulk-progress" style="display:none;">
-                <h2><?php esc_html_e('Processing Status', 'ai-content-automation'); ?></h2>
+            <div id="aica-bulk-progress" class="card-like" style="display:none;">
+                <div class="aica-step-header">
+                    <span class="aica-step-num">3</span>
+                    <h2><?php esc_html_e('Processing Status', 'ai-content-automation'); ?></h2>
+                </div>
                 <div class="aica-bulk-stats">
                     <span class="aica-stat completed">✓ <span id="aica-stat-completed">0</span> <?php esc_html_e('completed', 'ai-content-automation'); ?></span>
                     <span class="aica-stat processing">⏳ <span id="aica-stat-processing">0</span> <?php esc_html_e('processing', 'ai-content-automation'); ?></span>
@@ -498,13 +516,27 @@ class AICA_Admin {
                     <span class="aica-stat failed">✕ <span id="aica-stat-failed">0</span> <?php esc_html_e('failed', 'ai-content-automation'); ?></span>
                     <span class="aica-stat saved">💾 <span id="aica-stat-saved">0</span> <?php esc_html_e('fields saved', 'ai-content-automation'); ?></span>
                 </div>
-                <p id="aica-bulk-status-message" class="description" style="display:none;"></p>
+                <p id="aica-bulk-status-message" class="aica-field-hint" style="display:none;"></p>
                 <div class="aica-progress-bar">
                     <div class="aica-progress-fill" style="width: 0%"></div>
                 </div>
                 <button type="button" class="button" id="aica-bulk-retry" style="display:none;">
                     <?php esc_html_e('Retry Failed Items', 'ai-content-automation'); ?>
                 </button>
+            </div>
+
+            <div id="aica-bulk-preview" class="card-like" style="display:none;">
+                <div class="aica-step-header">
+                    <span class="aica-step-num">4</span>
+                    <h2><?php esc_html_e('Review & Apply', 'ai-content-automation'); ?></h2>
+                </div>
+                <p class="aica-field-hint"><?php esc_html_e('Review generated content for each item. Edit values if needed, then apply to save in WordPress.', 'ai-content-automation'); ?></p>
+                <div id="aica-bulk-preview-list" class="aica-bulk-preview-list"></div>
+                <div class="aica-preview-actions">
+                    <button type="button" class="button button-primary" id="aica-bulk-apply-all">
+                        <?php esc_html_e('Apply All to WordPress', 'ai-content-automation'); ?>
+                    </button>
+                </div>
             </div>
         </div>
         <?php
