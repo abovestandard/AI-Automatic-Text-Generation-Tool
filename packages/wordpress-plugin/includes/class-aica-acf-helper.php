@@ -120,28 +120,75 @@ class AICA_ACF_Helper {
 
     /**
      * Save a value to an ACF field using dot-notation path.
-     * Supports: group.subfield, group.repeater (JSON array value)
+     * Supports nested groups, repeaters, text, and wysiwyg fields.
      */
     public static function save_field_path(string $path, $value, $object_id): bool {
         if (!function_exists('update_field')) {
             return false;
         }
 
-        $parts = explode('.', $path);
+        $parsed = self::parse_value($value);
+        $parts  = explode('.', $path);
+
         if (count($parts) === 1) {
-            $parsed = self::parse_value($value);
             return (bool) update_field($parts[0], $parsed, $object_id);
         }
 
-        $root = $parts[0];
-        $nested = self::build_nested_value(array_slice($parts, 1), self::parse_value($value));
+        $root   = $parts[0];
+        $nested = self::build_nested_value(array_slice($parts, 1), $parsed);
 
         $existing = get_field($root, $object_id);
         if (is_array($existing) && is_array($nested)) {
-            $nested = array_replace_recursive($existing, $nested);
+            $nested = self::deep_merge_nested($existing, $nested);
         }
 
         return (bool) update_field($root, $nested, $object_id);
+    }
+
+    /**
+     * Merge nested ACF data: replace repeater rows entirely, merge group sub-fields.
+     */
+    private static function deep_merge_nested(array $base, array $overlay): array {
+        foreach ($overlay as $key => $value) {
+            if (is_array($value) && self::is_list_array($value)) {
+                $base[$key] = self::normalize_repeater_rows($value);
+            } elseif (is_array($value) && is_array($base[$key] ?? null) && self::is_assoc_array($value)) {
+                $base[$key] = self::deep_merge_nested($base[$key], $value);
+            } else {
+                $base[$key] = $value;
+            }
+        }
+        return $base;
+    }
+
+    /**
+     * Normalize repeater row values (decode JSON strings, merge nested repeaters).
+     */
+    private static function normalize_repeater_rows(array $rows): array {
+        $normalized = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $item = [];
+            foreach ($row as $key => $val) {
+                $val = self::parse_value($val);
+                if (is_array($val) && self::is_list_array($val)) {
+                    $item[$key] = self::normalize_repeater_rows($val);
+                } else {
+                    $item[$key] = $val;
+                }
+            }
+            $normalized[] = $item;
+        }
+        return $normalized;
+    }
+
+    private static function is_list_array(array $arr): bool {
+        if ($arr === []) {
+            return true;
+        }
+        return array_keys($arr) === range(0, count($arr) - 1);
     }
 
     private static function build_nested_value(array $parts, $value): array {
@@ -151,7 +198,7 @@ class AICA_ACF_Helper {
         return [$parts[0] => self::build_nested_value(array_slice($parts, 1), $value)];
     }
 
-    private static function parse_value($value) {
+    public static function parse_value($value) {
         if (!is_string($value)) {
             return $value;
         }

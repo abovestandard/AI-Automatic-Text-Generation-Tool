@@ -56,7 +56,8 @@ class AICA_Field_Filler {
                 return ['method' => 'js', 'field' => $target_field, 'note' => 'Fill via JavaScript on save'];
 
             case 'acf':
-                return ['method' => 'js', 'field' => $target_field, 'acf' => true];
+            case 'acf_nested':
+                return ['method' => 'js', 'field' => $target_field, 'acf' => true, 'nested' => $target_type === 'acf_nested'];
 
             case 'meta':
                 return ['method' => 'js', 'field' => $target_field, 'meta' => true];
@@ -89,7 +90,13 @@ class AICA_Field_Filler {
     public static function get_field_selector(string $target_type, string $target_field): string {
         switch ($target_type) {
             case 'acf':
-                return "[data-name=\"{$target_field}\"] textarea, [data-name=\"{$target_field}\"] input, [data-key*=\"{$target_field}\"] textarea, [data-key*=\"{$target_field}\"] input, #acf-{$target_field}";
+            case 'acf_nested':
+                $field_name = $target_field;
+                if ($target_type === 'acf_nested' && strpos($target_field, '.') !== false) {
+                    $parts      = explode('.', $target_field);
+                    $field_name = end($parts);
+                }
+                return "[data-name=\"{$field_name}\"] textarea, [data-name=\"{$field_name}\"] input, [data-key*=\"{$field_name}\"] textarea, [data-key*=\"{$field_name}\"] input, #acf-{$field_name}";
 
             case 'post_field':
                 $selectors = [

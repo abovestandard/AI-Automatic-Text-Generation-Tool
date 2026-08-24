@@ -150,7 +150,7 @@ class AICA_Admin {
                 <div class="aica-preview-content"></div>
                 <div class="aica-preview-actions">
                     <button type="button" class="button button-primary aica-apply-btn">
-                        <?php esc_html_e('Apply to Fields', 'ai-content-automation'); ?>
+                        <?php esc_html_e('Save to ACF Fields', 'ai-content-automation'); ?>
                     </button>
                     <button type="button" class="button aica-cancel-btn">
                         <?php esc_html_e('Cancel', 'ai-content-automation'); ?>

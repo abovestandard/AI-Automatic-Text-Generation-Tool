@@ -65,7 +65,8 @@ class AICA_Content_Saver {
                     return AICA_ACF_Helper::save_field_path($target_field, $value, $object_id);
                 }
                 if (function_exists('update_field')) {
-                    return (bool) update_field($target_field, $value, $object_id);
+                    $parsed = is_string($value) ? AICA_ACF_Helper::parse_value($value) : $value;
+                    return (bool) update_field($target_field, $parsed, $object_id);
                 }
                 return (bool) update_post_meta($post_id, $target_field, $value);
 
@@ -95,7 +96,8 @@ class AICA_Content_Saver {
                     return AICA_ACF_Helper::save_field_path($target_field, $value, $object_id);
                 }
                 if (function_exists('update_field')) {
-                    return (bool) update_field($target_field, $value, $object_id);
+                    $parsed = is_string($value) ? AICA_ACF_Helper::parse_value($value) : $value;
+                    return (bool) update_field($target_field, $parsed, $object_id);
                 }
                 return (bool) update_term_meta($term_id, $target_field, $value);
 

@@ -262,11 +262,48 @@
         });
 
         $panel.find('.aica-apply-btn').on('click', function () {
-            if (!currentResult || !currentResult.fillInstructions) return;
-            const results = FieldFiller.fill(currentResult.fillInstructions);
-            const filled = results.filter(r => r.filled).length;
-            alert(`Applied content to ${filled} of ${results.length} fields. Review and save when ready.`);
-            $panel.find('.aica-preview').hide();
+            if (!currentResult || !currentResult.result) return;
+
+            const mappedFields = currentResult.result.mappedFields || [];
+            if (!mappedFields.length) {
+                alert('No mapped fields to save.');
+                return;
+            }
+
+            const $btn = $(this);
+            const applyMode = $panel.find('.aica-apply-mode').val();
+            const saveMode  = applyMode === 'preview' ? 'replace' : applyMode;
+
+            $btn.prop('disabled', true).text('Saving...');
+
+            wp.apiFetch({
+                path: '/ai-content/v1/save-content',
+                method: 'POST',
+                data: {
+                    itemType,
+                    itemId,
+                    taxonomy,
+                    applyMode: saveMode,
+                    mappedFields,
+                },
+            }).then(function (result) {
+                $btn.prop('disabled', false).text(config.strings.apply || 'Save to ACF Fields');
+                if (result.saved > 0) {
+                    alert(`Saved ${result.saved} of ${result.total} fields successfully. The page will reload to show updated values.`);
+                    location.reload();
+                } else {
+                    const reasons = (result.results || [])
+                        .filter(r => !r.saved)
+                        .map(r => `${r.targetField}: ${r.reason || 'failed'}`)
+                        .join('\n');
+                    alert(`Could not save fields.\n${reasons || 'Check your field mappings and ACF field paths.'}`);
+                }
+                $panel.find('.aica-preview').hide();
+                currentResult = null;
+            }).catch(function (err) {
+                $btn.prop('disabled', false).text(config.strings.apply || 'Save to ACF Fields');
+                alert('Save failed: ' + (err.message || 'Unknown error'));
+            });
         });
 
         $panel.find('.aica-cancel-btn').on('click', function () {
