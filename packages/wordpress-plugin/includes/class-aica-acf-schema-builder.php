@@ -25,7 +25,7 @@ class AICA_ACF_Schema_Builder {
 
         foreach ($tree as $acf_group) {
             foreach ($acf_group['fields'] as $field) {
-                self::collect_targets($field, $output_fields, $mappings, $schema_entries, $source_data);
+                self::collect_targets($field, $output_fields, $mappings, $schema_entries, $source_data, $field['path'] ?? ($field['name'] ?? ''));
             }
         }
 
@@ -42,12 +42,18 @@ class AICA_ACF_Schema_Builder {
         array &$output_fields,
         array &$mappings,
         array &$schema_entries,
-        array $source_data
+        array $source_data,
+        string $path = ''
     ): void {
         $type = $field['type'] ?? 'text';
         $name = $field['name'] ?? '';
+        $path = $path !== '' ? $path : ($field['path'] ?? $name);
 
         if ($name === '' || in_array($type, ['tab', 'accordion', 'message'], true)) {
+            return;
+        }
+
+        if (self::is_excluded($path, $name)) {
             return;
         }
 
@@ -113,6 +119,10 @@ class AICA_ACF_Schema_Builder {
         $name  = $field['name'];
         $path  = $field['path'];
         $label = $field['label'] ?? $name;
+
+        if (self::is_excluded($path, $name)) {
+            return;
+        }
 
         $output_fields[] = [
             'key'         => $name,
@@ -244,6 +254,7 @@ class AICA_ACF_Schema_Builder {
             'Respond with a valid JSON object. Each top-level key maps to an ACF section.',
             'Omit Image, File, Taxonomy, Post Object, and Link fields — they are set manually in WordPress.',
             'Use HTML in wysiwyg/textarea fields where appropriate.',
+            'Text field values must be plain strings (e.g. "My title"). Never wrap values in {_type: ...} objects.',
             '',
             'Required JSON structure:',
             '{',
@@ -276,7 +287,7 @@ class AICA_ACF_Schema_Builder {
             return '"<p>HTML content</p>"';
         }
 
-        return '"string"';
+        return '"Your text here"';
     }
 
     private static function schema_object_to_json(array $fields): string {
@@ -294,13 +305,38 @@ class AICA_ACF_Schema_Builder {
                 $parts[] = '"' . $name . '": ' . self::schema_object_to_json($sub['fields'] ?? []);
             } elseif (is_array($sub) && ($sub['_type'] ?? '') === 'html') {
                 $parts[] = '"' . $name . '": "<p>HTML</p>"';
-            } elseif (is_array($sub)) {
-                $parts[] = '"' . $name . '": ' . self::schema_object_to_json($sub);
+            } elseif (is_array($sub) && ($sub['_type'] ?? '') === 'text') {
+                $parts[] = '"' . $name . '": "Your text here"';
             } else {
-                $parts[] = '"' . $name . '": "string"';
+                $parts[] = '"' . $name . '": "Your text here"';
             }
         }
 
         return '{ ' . implode(', ', $parts) . ' }';
+    }
+
+    /**
+     * Check whether a field path or name is listed in plugin settings exclusions.
+     */
+    private static function is_excluded(string $path, string $name): bool {
+        foreach (self::get_exclude_patterns() as $pattern) {
+            if ($pattern === $path || $pattern === $name) {
+                return true;
+            }
+            if ($path !== '' && (strpos($path, $pattern . '.') === 0 || strpos($path, $pattern . '_') === 0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function get_exclude_patterns(): array {
+        static $patterns = null;
+        if ($patterns === null) {
+            $raw = AICA_Settings::get('acf_exclude_fields', '');
+            $lines = preg_split('/\r\n|\r|\n/', (string) $raw);
+            $patterns = array_values(array_filter(array_map('trim', $lines ?: [])));
+        }
+        return $patterns;
     }
 }

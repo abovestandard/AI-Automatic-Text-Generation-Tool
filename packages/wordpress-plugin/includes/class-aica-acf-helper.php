@@ -145,7 +145,7 @@ class AICA_ACF_Helper {
             return false;
         }
 
-        $parsed = self::parse_value($value);
+        $parsed = self::normalize_ai_value(self::parse_value($value));
         $parts  = explode('.', $path);
 
         if (count($parts) === 1) {
@@ -287,6 +287,43 @@ class AICA_ACF_Helper {
             }
         }
         return $value;
+    }
+
+    /**
+     * Unwrap mistaken AI output like {"_type":"actual content"} into plain strings.
+     */
+    public static function normalize_ai_value($value) {
+        if (is_string($value)) {
+            $parsed = self::parse_value($value);
+            return $parsed === $value ? $value : self::normalize_ai_value($parsed);
+        }
+
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        if (self::is_ai_type_wrapper($value)) {
+            return (string) $value['_type'];
+        }
+
+        if (self::is_list_array($value)) {
+            return array_map([self::class, 'normalize_ai_value'], $value);
+        }
+
+        $normalized = [];
+        foreach ($value as $key => $item) {
+            $normalized[$key] = self::normalize_ai_value($item);
+        }
+        return $normalized;
+    }
+
+    private static function is_ai_type_wrapper(array $value): bool {
+        if (count($value) !== 1 || !array_key_exists('_type', $value) || !is_string($value['_type'])) {
+            return false;
+        }
+
+        $marker = $value['_type'];
+        return !in_array($marker, ['text', 'html', 'group', 'repeater', 'string'], true);
     }
 
     private static function is_assoc_array(array $arr): bool {

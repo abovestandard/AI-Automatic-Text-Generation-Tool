@@ -35,12 +35,15 @@ class AICA_Settings {
     }
 
     public function sanitize_settings(array $input): array {
+        $existing = get_option(self::OPTION_KEY, []);
+
         return [
             'api_url'            => esc_url_raw($input['api_url'] ?? ''),
             'project_id'         => sanitize_text_field($input['project_id'] ?? ''),
             'default_apply_mode' => sanitize_text_field($input['default_apply_mode'] ?? 'preview'),
             'default_prompt_id'  => sanitize_text_field($input['default_prompt_id'] ?? ''),
             'openai_api_key'     => sanitize_text_field($input['openai_api_key'] ?? ''),
+            'acf_exclude_fields' => sanitize_textarea_field($input['acf_exclude_fields'] ?? ($existing['acf_exclude_fields'] ?? '')),
         ];
     }
 
@@ -93,6 +96,16 @@ class AICA_Settings {
                         <td>
                             <input type="text" id="default_prompt_id" name="<?php echo esc_attr(self::OPTION_KEY); ?>[default_prompt_id]"
                                    value="<?php echo esc_attr($settings['default_prompt_id'] ?? ''); ?>" class="regular-text" />
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><label for="acf_exclude_fields"><?php esc_html_e('Exclude ACF Fields (Auto Mode)', 'ai-content-automation'); ?></label></th>
+                        <td>
+                            <textarea id="acf_exclude_fields" name="<?php echo esc_attr(self::OPTION_KEY); ?>[acf_exclude_fields]"
+                                      rows="6" class="large-text code"><?php echo esc_textarea($settings['acf_exclude_fields'] ?? ''); ?></textarea>
+                            <p class="description">
+                                <?php esc_html_e('One field path or name per line. Excluded fields are skipped during ACF Auto Mode generation and save. Example: afsnit_1 or indstillinger_for_produktvisning.afsnit_2', 'ai-content-automation'); ?>
+                            </p>
                         </td>
                     </tr>
                 </table>
