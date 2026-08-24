@@ -131,7 +131,7 @@ class AICA_ACF_Helper {
         $parts  = explode('.', $path);
 
         if (count($parts) === 1) {
-            return (bool) update_field($parts[0], $parsed, $object_id);
+            return self::acf_update_and_verify($parts[0], $parsed, $object_id, $path, $parsed);
         }
 
         $root   = $parts[0];
@@ -142,7 +142,62 @@ class AICA_ACF_Helper {
             $nested = self::deep_merge_nested($existing, $nested);
         }
 
-        return (bool) update_field($root, $nested, $object_id);
+        return self::acf_update_and_verify($root, $nested, $object_id, $path, $parsed);
+    }
+
+    /**
+     * Update an ACF field and verify success.
+     * update_field() often returns false even when data was saved (ACF quirk).
+     */
+    private static function acf_update_and_verify(string $field_name, $value, $object_id, string $verify_path, $expected): bool {
+        update_field($field_name, $value, $object_id);
+
+        $saved = self::get_value_at_path($verify_path, $object_id);
+        return self::value_was_saved($saved, $expected);
+    }
+
+    public static function get_value_at_path(string $path, $object_id) {
+        $parts = explode('.', $path);
+        $root  = get_field($parts[0], $object_id);
+        if (count($parts) === 1) {
+            return $root;
+        }
+        return self::get_nested_value($root, array_slice($parts, 1));
+    }
+
+    public static function get_nested_value($data, array $parts) {
+        foreach ($parts as $part) {
+            if (!is_array($data) || !array_key_exists($part, $data)) {
+                return null;
+            }
+            $data = $data[$part];
+        }
+        return $data;
+    }
+
+    /**
+     * Check whether a value was persisted (handles ACF false negatives).
+     */
+    private static function value_was_saved($saved, $expected): bool {
+        if ($expected === null || $expected === '') {
+            return false;
+        }
+
+        if (is_array($expected)) {
+            if (!is_array($saved) || empty($saved)) {
+                return false;
+            }
+            if (self::is_list_array($expected)) {
+                return count($saved) >= count($expected);
+            }
+            return true;
+        }
+
+        if (is_string($expected) && is_string($saved)) {
+            return trim($saved) !== '';
+        }
+
+        return !empty($saved);
     }
 
     /**
