@@ -196,27 +196,25 @@ class AICA_REST_API {
 
         $acf_auto = !empty($params['acfAuto']);
         $acf_schema = null;
+        $acf_meta   = ['autoMode' => false, 'fallbackManual' => false, 'fieldCount' => 0, 'fields' => []];
 
-        if ($acf_auto) {
-            $kind = $item_type === 'term' ? 'taxonomy' : 'post_type';
-            $slug = $item_type === 'term' ? $taxonomy : get_post_type($item_id);
-            if ($slug) {
-                $acf_schema = AICA_ACF_Schema_Builder::get_generatable_schema($kind, $slug, $source_data);
-                $payload['acfAuto']   = true;
-                $payload['acfSchema'] = $acf_schema;
-
-                if (empty($acf_schema['outputFields'])) {
-                    return new WP_REST_Response([
-                        'error' => sprintf(
-                            'ACF Auto Mode found 0 generatable fields for %s "%s". Check that your ACF field group is assigned to this taxonomy and contains text/wysiwyg fields.',
-                            $kind,
-                            $slug
-                        ),
-                        'acfSchema' => $acf_schema,
-                    ], 400);
-                }
-            }
+        if ($item_type === 'term') {
+            $slug = $taxonomy;
+        } else {
+            $slug = sanitize_text_field($params['postType'] ?? '') ?: get_post_type($item_id);
+            $payload['postType'] = $slug;
         }
+
+        $resolved = AICA_Generation_Helper::apply_acf_auto_to_payload(
+            $payload,
+            $acf_auto,
+            $item_type,
+            $slug ?: '',
+            $source_data
+        );
+        $payload  = $resolved['payload'];
+        $acf_meta = $resolved['meta'];
+        $acf_schema = $payload['acfSchema'] ?? null;
 
         $result = $client->generate($payload);
 
@@ -237,9 +235,10 @@ class AICA_REST_API {
             'result'            => $result,
             'fillInstructions'  => $fill_instructions,
             'acfMeta'           => [
-                'autoMode'   => $acf_auto,
-                'fieldCount' => $acf_schema['fieldCount'] ?? 0,
-                'fields'     => array_column($acf_schema['outputFields'] ?? [], 'key'),
+                'autoMode'       => $acf_meta['autoMode'],
+                'fallbackManual' => $acf_meta['fallbackManual'],
+                'fieldCount'     => $acf_meta['fieldCount'],
+                'fields'         => $acf_meta['fields'],
             ],
         ]);
     }

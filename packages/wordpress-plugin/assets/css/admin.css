@@ -620,6 +620,27 @@
   color: var(--aica-primary);
 }
 
+.aica-bulk-failed-list {
+  margin: 12px 0 16px;
+  padding: 12px 16px;
+  border: 1px solid #f1aeb5;
+  border-radius: var(--aica-radius);
+  background: #fcf0f1;
+}
+
+.aica-bulk-failed-list h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--aica-danger);
+}
+
+.aica-bulk-failed-item {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 6px;
+  color: #50575e;
+}
+
 .aica-progress-bar {
   height: 10px;
   background: #e0e0e0;

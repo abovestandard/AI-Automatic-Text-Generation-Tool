@@ -124,6 +124,7 @@ class AICA_Bulk_Processor {
             $job['items'][$next_index]['generatedContent']    = $result['generatedContent'] ?? [];
             $job['items'][$next_index]['mappedFields']        = $result['mappedFields'] ?? [];
             $job['items'][$next_index]['applied']             = $result['applied'] ?? false;
+            $job['items'][$next_index]['acfMeta']             = $result['acfMeta'] ?? [];
             $job['items'][$next_index]['error']               = '';
         } catch (Exception $e) {
             $job = self::get_job($job_id);
@@ -247,30 +248,25 @@ class AICA_Bulk_Processor {
             'itemId'     => $item_id,
             'itemType'   => $item_type,
             'taxonomy'   => $taxonomy,
+            'postType'   => $item['postType'] ?? get_post_type($item_id),
             'sourceData' => $source_data,
             'images'     => AICA_Data_Collector::collect_images($source_data),
             'applyMode'  => $job['applyMode'],
         ];
 
-        if (!empty($job['acfAuto'])) {
-            $kind = $item_type === 'term' ? 'taxonomy' : 'post_type';
-            $slug = $item_type === 'term'
-                ? $taxonomy
-                : ($item['postType'] ?: get_post_type($item_id));
+        $slug = $item_type === 'term'
+            ? $taxonomy
+            : ($item['postType'] ?: get_post_type($item_id));
 
-            if ($slug) {
-                $acf_schema = AICA_ACF_Schema_Builder::get_generatable_schema($kind, $slug, $source_data);
-                if (empty($acf_schema['outputFields'])) {
-                    throw new Exception(sprintf(
-                        'ACF Auto Mode found 0 generatable fields for %s "%s".',
-                        $kind,
-                        $slug
-                    ));
-                }
-                $payload['acfAuto']   = true;
-                $payload['acfSchema'] = $acf_schema;
-            }
-        }
+        $resolved = AICA_Generation_Helper::apply_acf_auto_to_payload(
+            $payload,
+            !empty($job['acfAuto']),
+            $item_type,
+            $slug ?: '',
+            $source_data
+        );
+        $payload = $resolved['payload'];
+        $acf_meta = $resolved['meta'];
 
         $result = $client->generate($payload);
         if (!empty($result['error'])) {
@@ -307,6 +303,7 @@ class AICA_Bulk_Processor {
             'generatedContent'   => $result['generatedContent'] ?? [],
             'mappedFields'       => $mapped_fields,
             'applied'            => $applied,
+            'acfMeta'            => $acf_meta,
         ];
     }
 

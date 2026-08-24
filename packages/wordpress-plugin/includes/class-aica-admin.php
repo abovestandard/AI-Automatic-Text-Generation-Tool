@@ -462,11 +462,11 @@ class AICA_Admin {
 
                     <div class="aica-field">
                         <label class="checkbox-label aica-acf-auto-label" for="aica-bulk-acf-auto">
-                            <input type="checkbox" id="aica-bulk-acf-auto" checked />
+                            <input type="checkbox" id="aica-bulk-acf-auto" />
                             <?php esc_html_e('ACF Auto Mode', 'ai-content-automation'); ?>
                         </label>
-                        <p class="aica-field-hint">
-                            <?php esc_html_e('Automatically detect and map ACF fields for each item.', 'ai-content-automation'); ?>
+                        <p class="aica-field-hint" id="aica-bulk-acf-hint">
+                            <?php esc_html_e('Enable for ACF category/term fields. Turn OFF for post title and Gutenberg content prompts.', 'ai-content-automation'); ?>
                         </p>
                     </div>
 
@@ -517,6 +517,7 @@ class AICA_Admin {
                     <span class="aica-stat saved">💾 <span id="aica-stat-saved">0</span> <?php esc_html_e('fields saved', 'ai-content-automation'); ?></span>
                 </div>
                 <p id="aica-bulk-status-message" class="aica-field-hint" style="display:none;"></p>
+                <div id="aica-bulk-failed-list" class="aica-bulk-failed-list" style="display:none;"></div>
                 <div class="aica-progress-bar">
                     <div class="aica-progress-fill" style="width: 0%"></div>
                 </div>

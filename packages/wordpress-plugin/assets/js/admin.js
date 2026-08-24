@@ -378,9 +378,14 @@
         $content.empty();
 
         if (response.acfMeta) {
-            const mode = response.acfMeta.autoMode
-                ? `ACF Auto Mode: ${response.acfMeta.fieldCount} field(s) detected`
-                : 'Manual prompt mode (ACF Auto off or no fields found)';
+            let mode = '';
+            if (response.acfMeta.autoMode) {
+                mode = `ACF Auto Mode: ${response.acfMeta.fieldCount} field(s) detected`;
+            } else if (response.acfMeta.fallbackManual) {
+                mode = 'ACF Auto had no fields — using your prompt mappings instead.';
+            } else {
+                mode = 'Manual prompt mode (ACF Auto off)';
+            }
             $content.append(`<p class="aica-field-hint"><strong>${escapeHtml(mode)}</strong></p>`);
         }
 
@@ -709,6 +714,16 @@
         $('#aica-bulk-apply-mode').on('change', updateBulkApplyHint);
         updateBulkApplyHint();
 
+        $('#aica-bulk-content-type').on('change', function () {
+            const value = $(this).val() || '';
+            const isTaxonomy = value.indexOf('taxonomy:') === 0;
+            $('#aica-bulk-acf-auto').prop('checked', isTaxonomy);
+            updateBulkAcfHint();
+        });
+        updateBulkAcfHint();
+
+        $('#aica-bulk-acf-auto').on('change', updateBulkAcfHint);
+
         $('#aica-bulk-load-items').on('click', function () {
             const contentType = $('#aica-bulk-content-type').val();
             if (!contentType) {
@@ -738,6 +753,18 @@
         $(document).on('click', '.aica-bulk-apply-item', function () {
             applyBulkItem($(this).closest('.aica-bulk-preview-item'));
         });
+    }
+
+    function updateBulkAcfHint() {
+        const isTaxonomy = ($('#aica-bulk-content-type').val() || '').indexOf('taxonomy:') === 0;
+        const acfOn = $('#aica-bulk-acf-auto').is(':checked');
+        let hint = 'Enable for ACF category/term fields. Turn OFF for post title and Gutenberg content prompts.';
+        if (acfOn && !isTaxonomy) {
+            hint = 'ACF Auto is ON for posts. If your prompt maps post_title/post_content, turn ACF Auto OFF to use manual mappings.';
+        } else if (acfOn && isTaxonomy) {
+            hint = 'ACF Auto will detect and map taxonomy ACF fields automatically.';
+        }
+        $('#aica-bulk-acf-hint').text(hint);
     }
 
     function updateBulkApplyHint() {
@@ -815,6 +842,7 @@
         $('#aica-bulk-progress').show();
         $('#aica-bulk-preview').hide();
         $('#aica-bulk-preview-list').empty();
+        $('#aica-bulk-failed-list').hide().empty();
         $('#aica-bulk-status-message').hide().text('');
         $('#aica-stat-completed, #aica-stat-processing, #aica-stat-pending, #aica-stat-failed, #aica-stat-saved').text('0');
         $('.aica-progress-fill').css('width', '0%');
@@ -878,7 +906,10 @@
 
                     if (stats.failed > 0) {
                         message += ` ${stats.failed} item(s) failed.`;
+                        renderBulkFailedItems(job);
                         $('#aica-bulk-retry').show();
+                    } else {
+                        $('#aica-bulk-failed-list').hide().empty();
                     }
 
                     $('#aica-bulk-status-message').text(message).show();
@@ -888,8 +919,30 @@
                 clearInterval(pollInterval);
                 pollInterval = null;
                 $('#aica-bulk-start').prop('disabled', false);
-                alert('Bulk status check failed: ' + (err.message || 'Unknown error'));
+                alert('Bulk status check failed: ' + extractApiError(err));
             });
+    }
+
+    function renderBulkFailedItems(job) {
+        const failed = (job.items || []).filter(function (item) {
+            return item.status === 'failed';
+        });
+
+        const $list = $('#aica-bulk-failed-list');
+        $list.empty();
+
+        if (!failed.length) {
+            $list.hide();
+            return;
+        }
+
+        $list.append('<h4>Failed items</h4>');
+        failed.forEach(function (item) {
+            $list.append(
+                `<div class="aica-bulk-failed-item"><strong>${escapeHtml(item.itemLabel || ('Item ' + item.itemId))}</strong>: ${escapeHtml(item.error || 'Unknown error')}</div>`
+            );
+        });
+        $list.show();
     }
 
     function showBulkPreview(job) {
