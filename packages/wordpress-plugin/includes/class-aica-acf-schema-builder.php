@@ -51,7 +51,47 @@ class AICA_ACF_Schema_Builder {
             return;
         }
 
-        // Parent group containing only child groups → one output per section
+        // Parent group with multiple section children (groups and/or repeaters)
+        if ($type === 'group' && !empty($field['children'])) {
+            $child_sections = array_values(array_filter(
+                $field['children'],
+                fn($c) => in_array($c['type'] ?? '', ['group', 'repeater'], true)
+                    && (
+                        (($c['type'] ?? '') === 'group' && self::group_has_generatable($c))
+                        || (($c['type'] ?? '') === 'repeater' && self::repeater_has_generatable($c))
+                    )
+            ));
+
+            if (count($child_sections) > 1) {
+                foreach ($child_sections as $child) {
+                    $is_repeater = ($child['type'] ?? '') === 'repeater';
+                    self::add_group_target($child, $output_fields, $mappings, $schema_entries, $source_data, $is_repeater);
+                }
+                return;
+            }
+        }
+
+        // Standalone text fields at taxonomy/post level
+        if (in_array($type, self::TEXT_TYPES, true)) {
+            $output_fields[] = [
+                'key'         => $name,
+                'label'       => $field['label'] ?? $name,
+                'type'        => $type === 'wysiwyg' ? 'html' : 'text',
+                'description' => 'Text field',
+            ];
+            $mappings[] = [
+                'aiOutputKey' => $name,
+                'targetType'  => 'acf_nested',
+                'targetField' => $field['path'],
+            ];
+            $schema_entries[] = [
+                'key'    => $name,
+                'path'   => $field['path'],
+                'schema' => $type === 'wysiwyg' ? ['_type' => 'html'] : ['_type' => 'text'],
+            ];
+            return;
+        }
+
         if ($type === 'group' && !empty($field['children'])) {
             $child_groups = array_values(array_filter(
                 $field['children'],
