@@ -9,6 +9,25 @@
     let currentResult = null;
     let uploadedImage = null; // { base64, mimeType, previewUrl }
 
+    function extractApiError(err, response) {
+        if (response) {
+            if (response.error) return response.error;
+            if (response.result && response.result.error) return response.result.error;
+            if (response.message) return response.message;
+        }
+        if (err) {
+            if (err.data) {
+                if (typeof err.data === 'string') return err.data;
+                if (err.data.error) return err.data.error;
+                if (err.data.message) return err.data.message;
+            }
+            if (err.message && err.message !== 'Internal Server Error') {
+                return err.message;
+            }
+        }
+        return config.strings?.error || 'Generation failed. Please try again.';
+    }
+
     // ─── Image Upload Helper ────────────────────────────────
 
     function initImageUpload($input, $preview, $previewImg, $removeBtn, onChange) {
@@ -275,12 +294,12 @@
                 if (response.result && response.result.status === 'success') {
                     showPreview($panel, response);
                 } else {
-                    alert(response.result?.error || config.strings.error);
+                    alert(extractApiError(null, response));
                 }
             }).catch(function (err) {
                 $panel.find('.aica-status').hide();
                 $panel.find('.aica-generate-btn').prop('disabled', false);
-                alert(err.message || config.strings.error);
+                alert(extractApiError(err));
             });
         });
 
@@ -581,12 +600,12 @@
                     };
                     showGeneratePreview(response);
                 } else {
-                    alert(response.result?.error || config.strings.error);
+                    alert(extractApiError(null, response));
                 }
             }).catch(function (err) {
                 $('#aica-generate-status').hide();
                 $generateBtn.prop('disabled', false);
-                alert(err.message || config.strings.error);
+                alert(extractApiError(err));
             });
         });
 
@@ -608,12 +627,21 @@
                     itemType: generateResult.itemType,
                     itemId: generateResult.itemId,
                     taxonomy: generateResult.taxonomy,
-                    applyMode: generateResult.applyMode,
+                    applyMode: generateResult.applyMode === 'preview' ? 'replace' : generateResult.applyMode,
                     mappedFields,
                 },
             }).then(function (result) {
                 $('#aica-generate-save').prop('disabled', false).text('Save to WordPress');
-                alert(`Saved ${result.saved} of ${result.total} fields successfully.`);
+                if (result.saved > 0) {
+                    mappedFields
+                        .filter(function (field) { return field.targetType === 'gutenberg'; })
+                        .forEach(function (field) {
+                            FieldFiller.fillGutenberg(field.value);
+                        });
+                    alert(`Saved ${result.saved} of ${result.total} fields successfully.`);
+                } else {
+                    alert('No fields were saved. Check your mappings and field values.');
+                }
                 $('#aica-generate-preview').hide();
                 generateResult = null;
             }).catch(function (err) {

@@ -36,6 +36,23 @@ export function resolveModelId(modelId: string): string {
   return DEPRECATED_MODEL_MAP[modelId] || modelId;
 }
 
+/** Maps platform model IDs to live Google Generative Language API model names. */
+export function resolveGeminiApiModel(modelId: string): string {
+  const resolved = resolveModelId(modelId);
+  const apiMap: Record<string, string> = {
+    'gemini-3.6-flash': 'gemini-2.0-flash',
+    'gemini-3.5-flash-lite': 'gemini-2.0-flash-lite',
+    'gemini-3.5-flash': 'gemini-2.0-flash',
+    'gemini-2.0-flash': 'gemini-2.0-flash',
+    'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite',
+    'gemini-1.5-flash': 'gemini-1.5-flash',
+    'gemini-1.5-flash-8b': 'gemini-1.5-flash-8b',
+    'gemini-1.5-pro': 'gemini-1.5-pro',
+  };
+
+  return apiMap[resolved] || resolved;
+}
+
 export function getModelProvider(modelId: string): 'openai' | 'google' {
   const resolved = resolveModelId(modelId);
   const model = AI_MODELS.find((m) => m.id === resolved);

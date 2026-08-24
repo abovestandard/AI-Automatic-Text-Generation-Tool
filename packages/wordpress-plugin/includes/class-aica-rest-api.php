@@ -140,6 +140,20 @@ class AICA_REST_API {
     }
 
     public function generate_content(WP_REST_Request $request): WP_REST_Response {
+        $project_id = AICA_Settings::get('project_id', '');
+        if ($project_id === '') {
+            return new WP_REST_Response([
+                'error' => 'Project ID is not configured. Go to AI Content → Settings and enter your Project ID from the platform dashboard.',
+            ], 400);
+        }
+
+        $api_url = AICA_Settings::get('api_url', '');
+        if ($api_url === '') {
+            return new WP_REST_Response([
+                'error' => 'Platform API URL is not configured. Go to AI Content → Settings.',
+            ], 400);
+        }
+
         $client = new AICA_API_Client();
         $params = $request->get_json_params();
 
@@ -207,7 +221,14 @@ class AICA_REST_API {
         $result = $client->generate($payload);
 
         if (isset($result['error'])) {
-            return new WP_REST_Response(['error' => $result['error']], 500);
+            return new WP_REST_Response(['error' => $result['error'], 'result' => null], 500);
+        }
+
+        if (($result['status'] ?? '') === 'error') {
+            return new WP_REST_Response([
+                'result' => $result,
+                'error'  => $result['error'] ?? 'Generation failed',
+            ], 200);
         }
 
         $fill_instructions = AICA_Field_Filler::get_js_fill_instructions($result['mappedFields'] ?? []);

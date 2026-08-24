@@ -121,7 +121,16 @@ export async function generateContent(
     let generatedContent: Record<string, string>;
 
     if (prompt.responseFormat === 'json') {
-      generatedContent = parseJsonResponse(rawResponse);
+      try {
+        generatedContent = parseJsonResponse(rawResponse);
+      } catch (parseErr) {
+        const parseMessage = parseErr instanceof Error ? parseErr.message : 'Invalid JSON';
+        return errorResult(
+          resultId,
+          request,
+          `Failed to parse AI JSON response: ${parseMessage}`
+        );
+      }
     } else {
       generatedContent = { content: rawResponse };
     }
