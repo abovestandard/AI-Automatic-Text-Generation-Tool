@@ -28,6 +28,7 @@ class AICA_Content_Saver {
             $value = AICA_ACF_Helper::normalize_ai_value(
                 is_string($value) ? AICA_ACF_Helper::parse_value($value) : $value
             );
+            $value = AICA_ACF_Schema_Builder::strip_excluded_keys($value);
             $saved = self::save_field($item_type, $item_id, $taxonomy, $object_id, $field, $value);
             $results[] = array_merge($field, ['saved' => $saved]);
         }

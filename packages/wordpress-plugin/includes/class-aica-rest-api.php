@@ -229,6 +229,27 @@ class AICA_REST_API {
             ], 200);
         }
 
+        if (!empty($result['generatedContent']) && is_array($result['generatedContent'])) {
+            foreach ($result['generatedContent'] as $key => $content_value) {
+                $parsed = is_string($content_value) ? AICA_ACF_Helper::parse_value($content_value) : $content_value;
+                if (is_array($parsed)) {
+                    $parsed = AICA_ACF_Schema_Builder::strip_excluded_keys($parsed);
+                    $result['generatedContent'][$key] = wp_json_encode($parsed);
+                }
+            }
+        }
+
+        if (!empty($result['mappedFields']) && is_array($result['mappedFields'])) {
+            foreach ($result['mappedFields'] as $index => $mapped_field) {
+                $mapped_value = $mapped_field['value'] ?? '';
+                $parsed = is_string($mapped_value) ? AICA_ACF_Helper::parse_value($mapped_value) : $mapped_value;
+                if (is_array($parsed)) {
+                    $parsed = AICA_ACF_Schema_Builder::strip_excluded_keys($parsed);
+                    $result['mappedFields'][$index]['value'] = wp_json_encode($parsed);
+                }
+            }
+        }
+
         $fill_instructions = AICA_Field_Filler::get_js_fill_instructions($result['mappedFields'] ?? []);
 
         return new WP_REST_Response([

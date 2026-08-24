@@ -193,6 +193,11 @@ class AICA_ACF_Schema_Builder {
             $count = self::get_repeater_count($field, $source_data);
             $row   = [];
             foreach ($field['children'] ?? [] as $sub) {
+                $sub_name = $sub['name'] ?? '';
+                $sub_path = $sub['path'] ?? $sub_name;
+                if ($sub_name !== '' && self::is_excluded($sub_path, $sub_name)) {
+                    continue;
+                }
                 if (!self::field_is_generatable($sub) && ($sub['type'] ?? '') !== 'group' && ($sub['type'] ?? '') !== 'repeater') {
                     continue;
                 }
@@ -211,6 +216,11 @@ class AICA_ACF_Schema_Builder {
         if ($type === 'group') {
             $obj = [];
             foreach ($field['children'] ?? [] as $sub) {
+                $sub_name = $sub['name'] ?? '';
+                $sub_path = $sub['path'] ?? $sub_name;
+                if ($sub_name !== '' && self::is_excluded($sub_path, $sub_name)) {
+                    continue;
+                }
                 if (!self::field_is_generatable($sub)) {
                     continue;
                 }
@@ -262,10 +272,16 @@ class AICA_ACF_Schema_Builder {
             'Omit Image, File, Taxonomy, Post Object, and Link fields — they are set manually in WordPress.',
             'Use HTML in wysiwyg/textarea fields where appropriate.',
             'Text field values must be plain strings (e.g. "My title"). Never wrap values in {_type: ...} objects.',
-            '',
-            'Required JSON structure:',
-            '{',
         ];
+
+        $excluded = self::get_exclude_patterns();
+        if (!empty($excluded)) {
+            $lines[] = 'Never include these excluded field keys anywhere in the JSON: ' . implode(', ', $excluded) . '.';
+        }
+
+        $lines[] = '';
+        $lines[] = 'Required JSON structure:';
+        $lines[] = '{';
 
         foreach ($entries as $i => $entry) {
             $comma = $i < count($entries) - 1 ? ',' : '';
@@ -325,25 +341,88 @@ class AICA_ACF_Schema_Builder {
     /**
      * Check whether a field path or name is listed in plugin settings exclusions.
      */
-    private static function is_excluded(string $path, string $name): bool {
+    public static function is_excluded(string $path, string $name): bool {
         foreach (self::get_exclude_patterns() as $pattern) {
-            if ($pattern === $path || $pattern === $name) {
-                return true;
-            }
-            if ($path !== '' && (strpos($path, $pattern . '.') === 0 || strpos($path, $pattern . '_') === 0)) {
+            if (self::pattern_matches_field($pattern, $path, $name)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static function get_exclude_patterns(): array {
-        static $patterns = null;
-        if ($patterns === null) {
-            $raw = AICA_Settings::get('acf_exclude_fields', '');
-            $lines = preg_split('/\r\n|\r|\n/', (string) $raw);
-            $patterns = array_values(array_filter(array_map('trim', $lines ?: [])));
+    /**
+     * Remove excluded keys from nested AI arrays before preview/save.
+     */
+    public static function strip_excluded_keys($value) {
+        if (!is_array($value)) {
+            return $value;
         }
-        return $patterns;
+
+        if (self::is_list_array($value)) {
+            $cleaned = [];
+            foreach ($value as $item) {
+                $cleaned[] = self::strip_excluded_keys($item);
+            }
+            return $cleaned;
+        }
+
+        $result = [];
+        foreach ($value as $key => $item) {
+            $key_name = (string) $key;
+            if (self::is_excluded($key_name, $key_name)) {
+                continue;
+            }
+            $result[$key] = self::strip_excluded_keys($item);
+        }
+
+        return $result;
+    }
+
+    public static function get_excluded_patterns(): array {
+        return self::get_exclude_patterns();
+    }
+
+    private static function pattern_matches_field(string $pattern, string $path, string $name): bool {
+        $pattern = self::normalize_field_key($pattern);
+        $path    = self::normalize_field_key($path);
+        $name    = self::normalize_field_key($name);
+
+        if ($pattern === '' || ($path === '' && $name === '')) {
+            return false;
+        }
+
+        if ($pattern === $path || $pattern === $name) {
+            return true;
+        }
+
+        if ($path !== '' && (strpos($path, $pattern . '.') === 0 || strpos($path, $pattern . '_') === 0)) {
+            return true;
+        }
+
+        foreach (explode('.', $path) as $segment) {
+            if (self::normalize_field_key($segment) === $pattern) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function normalize_field_key(string $value): string {
+        $value = trim(strtolower($value));
+        return str_replace('-', '_', $value);
+    }
+
+    private static function is_list_array(array $value): bool {
+        if ($value === []) {
+            return true;
+        }
+        return array_keys($value) === range(0, count($value) - 1);
+    }
+
+    private static function get_exclude_patterns(): array {
+        $raw = AICA_Settings::get('acf_exclude_fields', '');
+        $lines = preg_split('/\r\n|\r|\n/', (string) $raw);
+        return array_values(array_filter(array_map('trim', $lines ?: [])));
     }
 }

@@ -276,6 +276,27 @@ class AICA_Bulk_Processor {
             throw new Exception($result['error'] ?? 'Generation failed');
         }
 
+        if (!empty($result['generatedContent']) && is_array($result['generatedContent'])) {
+            foreach ($result['generatedContent'] as $key => $content_value) {
+                $parsed = is_string($content_value) ? AICA_ACF_Helper::parse_value($content_value) : $content_value;
+                if (is_array($parsed)) {
+                    $parsed = AICA_ACF_Schema_Builder::strip_excluded_keys($parsed);
+                    $result['generatedContent'][$key] = wp_json_encode($parsed);
+                }
+            }
+        }
+
+        if (!empty($result['mappedFields']) && is_array($result['mappedFields'])) {
+            foreach ($result['mappedFields'] as $index => $mapped_field) {
+                $mapped_value = $mapped_field['value'] ?? '';
+                $parsed = is_string($mapped_value) ? AICA_ACF_Helper::parse_value($mapped_value) : $mapped_value;
+                if (is_array($parsed)) {
+                    $parsed = AICA_ACF_Schema_Builder::strip_excluded_keys($parsed);
+                    $result['mappedFields'][$index]['value'] = wp_json_encode($parsed);
+                }
+            }
+        }
+
         $saved_count = 0;
         $apply_mode  = $job['applyMode'] ?? 'preview';
         $mapped_fields = $result['mappedFields'] ?? [];
