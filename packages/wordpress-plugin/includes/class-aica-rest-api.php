@@ -140,18 +140,9 @@ class AICA_REST_API {
     }
 
     public function generate_content(WP_REST_Request $request): WP_REST_Response {
-        $project_id = AICA_Settings::get('project_id', '');
-        if ($project_id === '') {
-            return new WP_REST_Response([
-                'error' => 'Project ID is not configured. Go to AI Content → Settings and enter your Project ID from the platform dashboard.',
-            ], 400);
-        }
-
-        $api_url = AICA_Settings::get('api_url', '');
-        if ($api_url === '') {
-            return new WP_REST_Response([
-                'error' => 'Platform API URL is not configured. Go to AI Content → Settings.',
-            ], 400);
+        $config_error = $this->get_config_error();
+        if ($config_error) {
+            return new WP_REST_Response(['error' => $config_error], 400);
         }
 
         $client = new AICA_API_Client();
@@ -265,11 +256,9 @@ class AICA_REST_API {
     }
 
     public function get_prompts(WP_REST_Request $request): WP_REST_Response {
-        $project_id = AICA_Settings::get('project_id', '');
-        if (empty($project_id)) {
-            return new WP_REST_Response([
-                'error' => 'Project ID is not configured. Go to AI Content → Settings and enter your Project ID.',
-            ], 400);
+        $config_error = $this->get_config_error();
+        if ($config_error) {
+            return new WP_REST_Response(['error' => $config_error], 400);
         }
 
         $client = new AICA_API_Client();
@@ -508,5 +497,19 @@ class AICA_REST_API {
         $client = new AICA_API_Client();
         $result = $client->test_connection();
         return new WP_REST_Response($result);
+    }
+
+    private function get_config_error(): ?string {
+        $api_url = AICA_Settings::get('api_url', '');
+        if ($api_url === '') {
+            return 'Platform API URL is not configured. Go to AI Content → Settings.';
+        }
+
+        $site_api_key = AICA_Settings::get('site_api_key', '');
+        if ($site_api_key === '') {
+            return 'Site API Key is not configured. Go to AI Content → Settings and enter the key from the CRM dashboard.';
+        }
+
+        return null;
     }
 }

@@ -39,7 +39,8 @@ class AICA_Settings {
 
         return [
             'api_url'            => esc_url_raw($input['api_url'] ?? ''),
-            'project_id'         => sanitize_text_field($input['project_id'] ?? ''),
+            'site_api_key'       => sanitize_text_field($input['site_api_key'] ?? ($existing['site_api_key'] ?? '')),
+            'project_id'         => sanitize_text_field($input['project_id'] ?? ($existing['project_id'] ?? '')),
             'default_apply_mode' => sanitize_text_field($input['default_apply_mode'] ?? 'preview'),
             'default_prompt_id'  => sanitize_text_field($input['default_prompt_id'] ?? ''),
             'openai_api_key'     => sanitize_text_field($input['openai_api_key'] ?? ''),
@@ -72,11 +73,22 @@ class AICA_Settings {
                         </td>
                     </tr>
                     <tr>
+                        <th><label for="site_api_key"><?php esc_html_e('Site API Key', 'ai-content-automation'); ?></label></th>
+                        <td>
+                            <input type="password" id="site_api_key" name="<?php echo esc_attr(self::OPTION_KEY); ?>[site_api_key]"
+                                   value="<?php echo esc_attr($settings['site_api_key'] ?? ''); ?>" class="regular-text"
+                                   autocomplete="off" />
+                            <p class="description">
+                                <?php esc_html_e('Site API Key from the central CRM dashboard (Website → Generate API Key). This connects only this WordPress site — site admins do not need CRM access.', 'ai-content-automation'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
                         <th><label for="project_id"><?php esc_html_e('Project ID', 'ai-content-automation'); ?></label></th>
                         <td>
                             <input type="text" id="project_id" name="<?php echo esc_attr(self::OPTION_KEY); ?>[project_id]"
-                                   value="<?php echo esc_attr($settings['project_id'] ?? ''); ?>" class="regular-text" />
-                            <p class="description"><?php esc_html_e('Project ID from the platform dashboard.', 'ai-content-automation'); ?></p>
+                                   value="<?php echo esc_attr($settings['project_id'] ?? ''); ?>" class="regular-text" readonly />
+                            <p class="description"><?php esc_html_e('Auto-filled when you test the connection. Managed by the CRM — do not share with site admins.', 'ai-content-automation'); ?></p>
                         </td>
                     </tr>
                     <tr>

@@ -146,9 +146,14 @@ class AICA_ACF_Helper {
         }
 
         $parsed = self::normalize_ai_value(self::parse_value($value));
+        $parsed = AICA_ACF_Schema_Builder::strip_excluded_keys($parsed);
         $parts  = explode('.', $path);
 
         if (count($parts) === 1) {
+            $existing = get_field($parts[0], $object_id);
+            if (is_array($existing) && is_array($parsed)) {
+                $parsed = self::preserve_excluded_fields($existing, $parsed);
+            }
             return self::acf_update_and_verify($parts[0], $parsed, $object_id, $path, $parsed);
         }
 
@@ -158,6 +163,7 @@ class AICA_ACF_Helper {
         $existing = get_field($root, $object_id);
         if (is_array($existing) && is_array($nested)) {
             $nested = self::deep_merge_nested($existing, $nested);
+            $nested = self::preserve_excluded_fields($existing, $nested);
         }
 
         return self::acf_update_and_verify($root, $nested, $object_id, $path, $parsed);
@@ -289,9 +295,6 @@ class AICA_ACF_Helper {
         return $value;
     }
 
-    /**
-     * Unwrap mistaken AI output like {"_type":"actual content"} into plain strings.
-     */
     public static function normalize_ai_value($value) {
         if (is_string($value)) {
             $parsed = self::parse_value($value);
@@ -315,6 +318,41 @@ class AICA_ACF_Helper {
             $normalized[$key] = self::normalize_ai_value($item);
         }
         return $normalized;
+    }
+
+    /**
+     * Keep excluded field values from existing ACF data when AI output omits them.
+     */
+    public static function preserve_excluded_fields($existing, $incoming) {
+        if (!is_array($existing) || !is_array($incoming)) {
+            return $incoming;
+        }
+
+        if (self::is_list_array($incoming)) {
+            $merged = [];
+            foreach ($incoming as $index => $row) {
+                $existing_row = is_array($existing[$index] ?? null) ? $existing[$index] : [];
+                $merged[] = is_array($row)
+                    ? self::preserve_excluded_fields($existing_row, $row)
+                    : $row;
+            }
+            return $merged;
+        }
+
+        $result = $incoming;
+        foreach ($existing as $key => $value) {
+            $key_name = (string) $key;
+            if (!AICA_ACF_Schema_Builder::is_excluded($key_name, $key_name)) {
+                if (is_array($value) && is_array($result[$key] ?? null)) {
+                    $result[$key] = self::preserve_excluded_fields($value, $result[$key]);
+                }
+                continue;
+            }
+
+            $result[$key] = $value;
+        }
+
+        return $result;
     }
 
     private static function is_ai_type_wrapper(array $value): bool {

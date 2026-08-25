@@ -1155,7 +1155,7 @@
 
                 if (!prompts || prompts.length === 0) {
                     $container.html(
-                        '<div class="aica-empty-state">No prompts found. Create prompts in the platform dashboard using the button above.</div>'
+                        '<div class="aica-empty-state">No prompts found. Contact your platform administrator to configure prompts in the CRM.</div>'
                     );
                     return;
                 }

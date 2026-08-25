@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Project } from '../api';
+import { api, Project, Website } from '../api';
 import ModelSelect from '../components/ModelSelect';
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [websites, setWebsites] = useState<Website[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini' });
+  const [form, setForm] = useState({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini', websiteId: '' });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadProjects(); }, []);
+  useEffect(() => { loadData(); }, []);
 
-  async function loadProjects() {
+  async function loadData() {
     try {
-      const data = await api.getProjects();
-      setProjects(data);
+      const [projectData, websiteData] = await Promise.all([api.getProjects(), api.getWebsites()]);
+      setProjects(projectData);
+      setWebsites(websiteData);
     } catch (e) {
       console.error(e);
     } finally {
@@ -24,16 +26,17 @@ export default function ProjectsPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (!form.websiteId) return;
     await api.createProject(form);
     setShowForm(false);
-    setForm({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini' });
-    loadProjects();
+    setForm({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini', websiteId: '' });
+    loadData();
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this project?')) return;
     await api.deleteProject(id);
-    loadProjects();
+    loadData();
   }
 
   if (loading) return <div className="loading">Loading...</div>;
@@ -49,6 +52,13 @@ export default function ProjectsPage() {
 
       {showForm && (
         <form className="card form-card" onSubmit={handleCreate}>
+          <div className="form-group">
+            <label>Website</label>
+            <select value={form.websiteId} onChange={e => setForm({ ...form, websiteId: e.target.value })} required>
+              <option value="">Select website...</option>
+              {websites.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          </div>
           <div className="form-group">
             <label>Project Name</label>
             <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />

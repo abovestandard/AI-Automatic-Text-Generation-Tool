@@ -4,44 +4,106 @@ import { AI_MODELS, extractVariables } from '@ai-content/core';
 import { getDb } from '../db';
 import { generateContent } from '../services/generation';
 import { createBulkJob, getBulkJob, processBulkJob, retryFailedItems, getJobStats } from '../services/bulk-queue';
+import {
+  authenticate,
+  requireAdmin,
+  requireAdminOrSiteKey,
+  requireProjectAccess,
+  blockSiteKey,
+  getAdminUser,
+} from '../middleware/auth';
+import { userCanAccessProject } from '../services/auth';
 
 export const apiRouter = Router();
 
+// Public models list (no sensitive data)
+apiRouter.get('/models', (_req: Request, res: Response) => {
+  res.json(AI_MODELS);
+});
+
+// Site context for WordPress plugin (site API key only)
+apiRouter.get('/site/context', authenticate, requireAdminOrSiteKey, (req: Request, res: Response) => {
+  if (req.auth?.type !== 'site') {
+    res.status(403).json({ error: 'Site API key required' });
+    return;
+  }
+
+  const websiteId = req.auth.websiteId!;
+  const projectId = req.auth.projectId!;
+
+  const db = getDb();
+  const website = db.prepare('SELECT * FROM websites WHERE id = ?').get(websiteId) as Record<string, unknown> | undefined;
+  if (!website) {
+    res.status(404).json({ error: 'Website not found' });
+    return;
+  }
+
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Record<string, unknown> | undefined;
+
+  res.json({
+    websiteId: website.id,
+    websiteName: website.name,
+    projectId,
+    projectName: project?.name,
+    domain: website.domain,
+  });
+});
+
+// All routes below require authentication
+apiRouter.use(authenticate);
+
 // ─── Projects ───────────────────────────────────────────────
 
-apiRouter.get('/projects', (_req: Request, res: Response) => {
+apiRouter.get('/projects', requireAdmin, (req: Request, res: Response) => {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
+  const user = getAdminUser(req)!;
+
+  let rows: unknown[];
+  if (user.isSuperAdmin) {
+    rows = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
+  } else if (user.websiteIds.length === 0) {
+    rows = [];
+  } else {
+    const placeholders = user.websiteIds.map(() => '?').join(',');
+    rows = db.prepare(`SELECT * FROM projects WHERE website_id IN (${placeholders}) ORDER BY created_at DESC`).all(...user.websiteIds);
+  }
   res.json(rows.map(formatProject));
 });
 
-apiRouter.get('/projects/:id', (req: Request, res: Response) => {
+apiRouter.get('/projects/:id', requireAdminOrSiteKey, requireProjectAccess('id'), (req: Request, res: Response) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Project not found' });
   res.json(formatProject(row));
 });
 
-apiRouter.get('/models', (_req: Request, res: Response) => {
-  res.json(AI_MODELS);
-});
-
-apiRouter.post('/projects', (req: Request, res: Response) => {
+apiRouter.post('/projects', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
   const db = getDb();
+  const user = getAdminUser(req)!;
   const id = uuidv4();
   const now = new Date().toISOString();
-  const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, geminiApiKey, defaultModel, defaultLanguage } = req.body;
+  const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, geminiApiKey, defaultModel, defaultLanguage, websiteId } = req.body;
+
+  if (!websiteId) {
+    res.status(400).json({ error: 'websiteId is required' });
+    return;
+  }
+
+  if (!user.isSuperAdmin && !user.websiteIds.includes(websiteId)) {
+    res.status(403).json({ error: 'Access denied to this website' });
+    return;
+  }
 
   db.prepare(`
-    INSERT INTO projects (id, name, description, wordpress_url, wordpress_api_key, openai_api_key, gemini_api_key, default_model, default_language, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, description || null, wordpressUrl || null, wordpressApiKey || null, openaiApiKey || null, geminiApiKey || null, defaultModel || 'gemini-3.6-flash', defaultLanguage || 'en', now, now);
+    INSERT INTO projects (id, name, description, wordpress_url, wordpress_api_key, openai_api_key, gemini_api_key, default_model, default_language, website_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, description || null, wordpressUrl || null, wordpressApiKey || null, openaiApiKey || null, geminiApiKey || null, defaultModel || 'gemini-3.6-flash', defaultLanguage || 'en', websiteId, now, now);
 
   const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
   res.status(201).json(formatProject(row));
 });
 
-apiRouter.put('/projects/:id', (req: Request, res: Response) => {
+apiRouter.put('/projects/:id', requireAdmin, blockSiteKey, requireProjectAccess('id'), (req: Request, res: Response) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Project not found' });
@@ -77,7 +139,7 @@ apiRouter.put('/projects/:id', (req: Request, res: Response) => {
   res.json(formatProject(row));
 });
 
-apiRouter.delete('/projects/:id', (req: Request, res: Response) => {
+apiRouter.delete('/projects/:id', requireAdmin, blockSiteKey, requireProjectAccess('id'), (req: Request, res: Response) => {
   const db = getDb();
   db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
   res.status(204).end();
@@ -85,20 +147,24 @@ apiRouter.delete('/projects/:id', (req: Request, res: Response) => {
 
 // ─── Prompts ────────────────────────────────────────────────
 
-apiRouter.get('/projects/:projectId/prompts', (req: Request, res: Response) => {
+apiRouter.get('/projects/:projectId/prompts', requireAdminOrSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM prompts WHERE project_id = ? ORDER BY created_at DESC').all(req.params.projectId);
   res.json(rows.map(formatPrompt));
 });
 
-apiRouter.get('/prompts/:id', (req: Request, res: Response) => {
+apiRouter.get('/prompts/:id', requireAdminOrSiteKey, (req: Request, res: Response) => {
   const db = getDb();
-  const row = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
   if (!row) return res.status(404).json({ error: 'Prompt not found' });
+
+  if (!canAccessPrompt(req, String(row.project_id))) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   res.json(formatPrompt(row));
 });
 
-apiRouter.post('/projects/:projectId/prompts', (req: Request, res: Response) => {
+apiRouter.post('/projects/:projectId/prompts', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
   const db = getDb();
   const id = uuidv4();
   const now = new Date().toISOString();
@@ -119,10 +185,14 @@ apiRouter.post('/projects/:projectId/prompts', (req: Request, res: Response) => 
   res.status(201).json(formatPrompt(row));
 });
 
-apiRouter.put('/prompts/:id', (req: Request, res: Response) => {
+apiRouter.put('/prompts/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
   if (!existing) return res.status(404).json({ error: 'Prompt not found' });
+
+  if (!canAccessPrompt(req, String(existing.project_id))) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
 
   const { name, description, systemPrompt, userPromptTemplate, outputFields, model, supportsVision, responseFormat } = req.body;
   const now = new Date().toISOString();
@@ -146,15 +216,22 @@ apiRouter.put('/prompts/:id', (req: Request, res: Response) => {
   res.json(formatPrompt(row));
 });
 
-apiRouter.delete('/prompts/:id', (req: Request, res: Response) => {
+apiRouter.delete('/prompts/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
   const db = getDb();
+  const existing = db.prepare('SELECT project_id FROM prompts WHERE id = ?').get(req.params.id) as { project_id: string } | undefined;
+  if (!existing) return res.status(404).json({ error: 'Prompt not found' });
+
+  if (!canAccessPrompt(req, existing.project_id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
   db.prepare('DELETE FROM prompts WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 
 // ─── Field Mappings ─────────────────────────────────────────
 
-apiRouter.get('/projects/:projectId/mappings', (req: Request, res: Response) => {
+apiRouter.get('/projects/:projectId/mappings', requireAdminOrSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
   const db = getDb();
   const { promptId } = req.query;
   let rows;
@@ -166,7 +243,7 @@ apiRouter.get('/projects/:projectId/mappings', (req: Request, res: Response) => 
   res.json(rows.map(formatMapping));
 });
 
-apiRouter.post('/projects/:projectId/mappings', (req: Request, res: Response) => {
+apiRouter.post('/projects/:projectId/mappings', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
   const db = getDb();
   const id = uuidv4();
   const { promptId, aiOutputKey, targetType, targetField, targetSelector, contentType, termTaxonomy } = req.body;
@@ -180,10 +257,14 @@ apiRouter.post('/projects/:projectId/mappings', (req: Request, res: Response) =>
   res.status(201).json(formatMapping(row));
 });
 
-apiRouter.put('/mappings/:id', (req: Request, res: Response) => {
+apiRouter.put('/mappings/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM field_mappings WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
   if (!existing) return res.status(404).json({ error: 'Mapping not found' });
+
+  if (!canAccessPrompt(req, String(existing.project_id))) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
 
   const { aiOutputKey, targetType, targetField, targetSelector, contentType, termTaxonomy } = req.body;
   db.prepare(`
@@ -199,15 +280,41 @@ apiRouter.put('/mappings/:id', (req: Request, res: Response) => {
   res.json(formatMapping(row));
 });
 
-apiRouter.delete('/mappings/:id', (req: Request, res: Response) => {
+apiRouter.delete('/mappings/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
   const db = getDb();
+  const existing = db.prepare('SELECT project_id FROM field_mappings WHERE id = ?').get(req.params.id) as { project_id: string } | undefined;
+  if (!existing) return res.status(404).json({ error: 'Mapping not found' });
+
+  if (!canAccessPrompt(req, existing.project_id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
   db.prepare('DELETE FROM field_mappings WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 
 // ─── Generation ─────────────────────────────────────────────
 
-apiRouter.post('/generate', async (req: Request, res: Response) => {
+apiRouter.post('/generate', requireAdminOrSiteKey, async (req: Request, res: Response) => {
+  const projectId = req.body.projectId as string;
+  if (!projectId) {
+    res.status(400).json({ error: 'projectId is required' });
+    return;
+  }
+
+  if (req.auth?.type === 'site' && req.auth.projectId !== projectId) {
+    res.status(403).json({ error: 'Access denied to this project' });
+    return;
+  }
+
+  if (req.auth?.type === 'admin') {
+    const user = getAdminUser(req);
+    if (!user || !userCanAccessProject(user, projectId)) {
+      res.status(403).json({ error: 'Access denied to this project' });
+      return;
+    }
+  }
+
   try {
     const result = await generateContent(req.body);
     res.json(result);
@@ -216,10 +323,15 @@ apiRouter.post('/generate', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.get('/results/:id', (req: Request, res: Response) => {
+apiRouter.get('/results/:id', requireAdminOrSiteKey, (req: Request, res: Response) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM generation_results WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
   if (!row) return res.status(404).json({ error: 'Result not found' });
+
+  if (!canAccessPrompt(req, String(row.project_id))) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
   res.json({
     id: row.id,
     projectId: row.project_id,
@@ -238,21 +350,33 @@ apiRouter.get('/results/:id', (req: Request, res: Response) => {
 
 // ─── Bulk Jobs ──────────────────────────────────────────────
 
-apiRouter.post('/projects/:projectId/bulk-jobs', (req: Request, res: Response) => {
+apiRouter.post('/projects/:projectId/bulk-jobs', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
   const { promptId, name, items, applyMode } = req.body;
   const job = createBulkJob(req.params.projectId, promptId, name, items, applyMode);
   res.status(201).json(job);
 });
 
-apiRouter.get('/bulk-jobs/:id', (req: Request, res: Response) => {
+apiRouter.get('/bulk-jobs/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
   const job = getBulkJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const user = getAdminUser(req);
+  if (!user || !userCanAccessProject(user, job.projectId)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
   res.json({ ...job, stats: getJobStats(job) });
 });
 
-apiRouter.post('/bulk-jobs/:id/start', async (req: Request, res: Response) => {
+apiRouter.post('/bulk-jobs/:id/start', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
   const job = getBulkJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const user = getAdminUser(req);
+  if (!user || !userCanAccessProject(user, job.projectId)) {
+    return res.status(403).json({ error: 'Access denied' });
+    return;
+  }
 
   const itemDataMap: Record<string, { sourceData: Record<string, unknown>; images?: Array<{ key: string; url: string }> }> =
     req.body.itemData || {};
@@ -266,13 +390,21 @@ apiRouter.post('/bulk-jobs/:id/start', async (req: Request, res: Response) => {
   res.json({ message: 'Job started', jobId: req.params.id });
 });
 
-apiRouter.post('/bulk-jobs/:id/retry', (req: Request, res: Response) => {
-  const job = retryFailedItems(req.params.id);
+apiRouter.post('/bulk-jobs/:id/retry', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
+  const job = getBulkJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  res.json(job);
+
+  const user = getAdminUser(req);
+  if (!user || !userCanAccessProject(user, job.projectId)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const retried = retryFailedItems(req.params.id);
+  if (!retried) return res.status(404).json({ error: 'Job not found' });
+  res.json(retried);
 });
 
-apiRouter.get('/projects/:projectId/bulk-jobs', (req: Request, res: Response) => {
+apiRouter.get('/projects/:projectId/bulk-jobs', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM bulk_jobs WHERE project_id = ? ORDER BY created_at DESC').all(req.params.projectId);
   res.json(rows.map((row) => {
@@ -287,12 +419,24 @@ apiRouter.get('/projects/:projectId/bulk-jobs', (req: Request, res: Response) =>
   }));
 });
 
-// ─── Formatters ─────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────
+
+function canAccessPrompt(req: Request, projectId: string): boolean {
+  if (req.auth?.type === 'site') {
+    return req.auth.projectId === projectId;
+  }
+  if (req.auth?.type === 'admin') {
+    const user = getAdminUser(req);
+    return !!user && userCanAccessProject(user, projectId);
+  }
+  return false;
+}
 
 function formatProject(row: unknown) {
   const r = row as Record<string, unknown>;
   return {
     id: r.id, name: r.name, description: r.description,
+    websiteId: r.website_id,
     wordpressUrl: r.wordpress_url, wordpressApiKey: r.wordpress_api_key ? '***' : null,
     hasOpenaiKey: !!r.openai_api_key,
     hasGeminiKey: !!r.gemini_api_key,

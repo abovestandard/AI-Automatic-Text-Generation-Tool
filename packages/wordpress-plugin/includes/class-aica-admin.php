@@ -179,8 +179,8 @@ class AICA_Admin {
                 <div class="aica-card">
                     <h2><?php esc_html_e('Quick Start', 'ai-content-automation'); ?></h2>
                     <ol>
-                        <li><?php esc_html_e('Configure the platform API URL and Project ID in Settings.', 'ai-content-automation'); ?></li>
-                        <li><?php esc_html_e('Create prompts and field mappings in the platform dashboard.', 'ai-content-automation'); ?></li>
+                        <li><?php esc_html_e('Configure the Platform API URL and Site API Key in Settings (provided by your platform administrator).', 'ai-content-automation'); ?></li>
+                        <li><?php esc_html_e('Prompts are managed centrally in the CRM — your administrator configures them for this website.', 'ai-content-automation'); ?></li>
                         <li><?php esc_html_e('Use Generate Content to create text for a specific post or category.', 'ai-content-automation'); ?></li>
                         <li><?php esc_html_e('Use Bulk Generation for processing multiple items.', 'ai-content-automation'); ?></li>
                     </ol>
@@ -202,7 +202,6 @@ class AICA_Admin {
     public function render_generate_page(): void {
         $this->render_config_notice();
         $content_types = AICA_Content_Registry::get_content_types();
-        $platform_url = rtrim(AICA_Settings::get('api_url', 'http://localhost:3001'), '/');
         ?>
         <div class="wrap aica-page aica-generate-page">
             <div class="aica-page-header">
@@ -268,8 +267,7 @@ class AICA_Admin {
                                 <option value=""><?php esc_html_e('Loading prompts...', 'ai-content-automation'); ?></option>
                             </select>
                             <p class="aica-field-hint">
-                                <?php esc_html_e('Manage prompts in the platform dashboard.', 'ai-content-automation'); ?>
-                                <a href="<?php echo esc_url($platform_url); ?>" target="_blank" rel="noopener"><?php esc_html_e('Open Prompt Manager', 'ai-content-automation'); ?> ↗</a>
+                                <?php esc_html_e('Prompts are configured by your platform administrator in the central CRM.', 'ai-content-automation'); ?>
                             </p>
                         </div>
                         <div class="aica-field">
@@ -334,24 +332,20 @@ class AICA_Admin {
     }
 
     public function render_prompts_page(): void {
-        $platform_url = rtrim(AICA_Settings::get('api_url', 'http://localhost:3001'), '/');
-        $project_id   = AICA_Settings::get('project_id', '');
         ?>
         <div class="wrap aica-page aica-prompts-page">
             <div class="aica-page-header">
                 <h1><?php esc_html_e('AI Prompts', 'ai-content-automation'); ?></h1>
-                <p class="aica-page-desc"><?php esc_html_e('Prompts define what content the AI generates. Create and manage them in the platform dashboard.', 'ai-content-automation'); ?></p>
+                <p class="aica-page-desc"><?php esc_html_e('View available prompts for this website. Prompts are managed centrally in the CRM by the platform administrator.', 'ai-content-automation'); ?></p>
             </div>
 
             <?php $this->render_config_notice(); ?>
 
-            <div class="aica-prompts-actions card-like">
-                <a href="<?php echo esc_url($platform_url . ($project_id ? "/projects/{$project_id}/prompts" : '')); ?>" target="_blank" rel="noopener" class="button button-primary">
-                    <?php esc_html_e('Create / Edit Prompts', 'ai-content-automation'); ?> ↗
-                </a>
-                <a href="<?php echo esc_url($platform_url . ($project_id ? "/projects/{$project_id}/mappings" : '')); ?>" target="_blank" rel="noopener" class="button">
-                    <?php esc_html_e('Field Mappings', 'ai-content-automation'); ?> ↗
-                </a>
+            <div class="aica-prompts-actions card-like aica-readonly-notice">
+                <p>
+                    <strong><?php esc_html_e('Prompt management is centralized.', 'ai-content-automation'); ?></strong>
+                    <?php esc_html_e('To create or edit prompts, contact your platform administrator or sign in to the central CRM dashboard.', 'ai-content-automation'); ?>
+                </p>
             </div>
 
             <div id="aica-prompts-list" class="card-like">
@@ -361,30 +355,26 @@ class AICA_Admin {
             </div>
 
             <div class="aica-help-box card-like">
-                <h3><?php esc_html_e('ACF Nested Field Mapping', 'ai-content-automation'); ?></h3>
-                <p><?php esc_html_e('For nested ACF structures (Groups, Repeaters), use dot notation in field mappings:', 'ai-content-automation'); ?></p>
-                <ul>
-                    <li><code>indstillinger_for_produktvisning.afsnit_1.underoverskrift</code> → <?php esc_html_e('Group → sub-group → text field', 'ai-content-automation'); ?></li>
-                    <li><code>indstillinger_for_produktvisning.afsnit_2</code> → <?php esc_html_e('Repeater (AI outputs JSON array)', 'ai-content-automation'); ?></li>
-                </ul>
-                <p class="aica-field-hint"><?php esc_html_e('Configure mappings in the platform dashboard under Field Mappings.', 'ai-content-automation'); ?></p>
+                <h3><?php esc_html_e('How prompts work', 'ai-content-automation'); ?></h3>
+                <p><?php esc_html_e('Prompts define what content the AI generates. Your platform administrator configures prompts and field mappings in the central CRM for this website only.', 'ai-content-automation'); ?></p>
+                <p class="aica-field-hint"><?php esc_html_e('You can use these prompts to generate content on posts, pages, and taxonomy terms from the Generate Content menu.', 'ai-content-automation'); ?></p>
             </div>
         </div>
         <?php
     }
 
     private function render_config_notice(): void {
-        $api_url    = AICA_Settings::get('api_url', '');
-        $project_id = AICA_Settings::get('project_id', '');
+        $api_url       = AICA_Settings::get('api_url', '');
+        $site_api_key  = AICA_Settings::get('site_api_key', '');
 
-        if (empty($project_id)) : ?>
+        if (empty($site_api_key)) : ?>
             <div class="notice notice-warning">
                 <p>
-                    <?php esc_html_e('Platform is not configured yet.', 'ai-content-automation'); ?>
+                    <?php esc_html_e('This website is not connected to the platform yet.', 'ai-content-automation'); ?>
                     <a href="<?php echo esc_url(admin_url('admin.php?page=ai-content-settings')); ?>">
                         <?php esc_html_e('Go to Settings', 'ai-content-automation'); ?>
                     </a>
-                    <?php esc_html_e('and enter your API URL and Project ID.', 'ai-content-automation'); ?>
+                    <?php esc_html_e('and enter your API URL and Site API Key from the CRM dashboard.', 'ai-content-automation'); ?>
                 </p>
             </div>
         <?php elseif (empty($api_url)) : ?>
