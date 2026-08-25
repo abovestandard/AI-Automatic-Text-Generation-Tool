@@ -43,7 +43,6 @@ class AICA_Settings {
             'project_id'         => sanitize_text_field($input['project_id'] ?? ($existing['project_id'] ?? '')),
             'default_apply_mode' => sanitize_text_field($input['default_apply_mode'] ?? 'preview'),
             'default_prompt_id'  => sanitize_text_field($input['default_prompt_id'] ?? ''),
-            'openai_api_key'     => sanitize_text_field($input['openai_api_key'] ?? ''),
             'acf_exclude_fields' => sanitize_textarea_field($input['acf_exclude_fields'] ?? ($existing['acf_exclude_fields'] ?? '')),
         ];
     }

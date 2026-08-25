@@ -1,6 +1,5 @@
 import './load-env';
 import { prisma } from './db';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Seeds the database with an example website, project, prompt, and field mappings.

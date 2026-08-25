@@ -11,7 +11,7 @@ import type {
   Prompt,
   FieldMapping,
 } from '@ai-content/core';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { prisma } from '../db';
 import { completeAI } from './ai-providers';
 import type { Prompt as PromptRow } from '@prisma/client';
@@ -37,7 +37,7 @@ function rowToPrompt(row: PromptRow): Prompt {
 export async function generateContent(
   request: GenerationRequest
 ): Promise<GenerationResult> {
-  const resultId = uuidv4();
+  const resultId = crypto.randomUUID();
 
   const promptRow = await prisma.prompt.findFirst({
     where: { id: request.promptId, projectId: request.projectId },

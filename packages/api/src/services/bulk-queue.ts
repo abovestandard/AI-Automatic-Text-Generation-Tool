@@ -1,5 +1,5 @@
+import crypto from 'crypto';
 import type { BulkJob, BulkJobItem, JobItemStatus } from '@ai-content/core';
-import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../db';
 import { formatBulkJobRow } from '../lib/formatters';
 import { generateContent } from './generation';
@@ -15,7 +15,7 @@ export async function createBulkJob(
 ): Promise<BulkJob> {
   const jobItems: BulkJobItem[] = items.map((item) => ({
     ...item,
-    id: uuidv4(),
+    id: crypto.randomUUID(),
     status: 'pending' as JobItemStatus,
     retryCount: 0,
   }));

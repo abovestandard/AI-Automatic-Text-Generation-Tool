@@ -49,7 +49,8 @@ Select Content → Select Prompt → Generate → Review → Auto-Fill Fields �
 
 ### Requirements
 
-- **Node.js 22.5+** (uses built-in `node:sqlite` — no Visual Studio / C++ build tools needed on Windows)
+- **Node.js 22.5+**
+- **PostgreSQL 14+** (local install, XAMPP PostgreSQL, or Docker)
 
 ### 1. Install Dependencies
 
@@ -61,23 +62,43 @@ npm install
 
 ```bash
 cp .env.example .env
-# Add your OpenAI API key to .env
 ```
 
-### 3. Start the Platform
+Edit `.env` and set your PostgreSQL connection:
+
+```env
+DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@localhost:5432/ai_content?schema=public"
+```
+
+Create the database once in PostgreSQL:
+
+```sql
+CREATE DATABASE ai_content;
+```
+
+### 3. Run Database Migrations
 
 ```bash
-# Build all packages
+npm run db:migrate
+```
+
+This creates all tables via Prisma CLI. Other useful commands:
+
+| Command | Purpose |
+|---------|---------|
+| `npm run db:migrate` | Apply migrations (development) |
+| `npm run db:migrate:deploy` | Apply migrations (production) |
+| `npm run db:studio` | Open Prisma Studio GUI |
+| `npm run db:seed` | Seed example website + prompt |
+
+### 4. Start the Platform
+
+```bash
 npm run build
-
-# Seed example data
-npx tsx packages/api/src/seed.ts
-
-# Start API server (includes admin dashboard)
 npm start
 ```
 
-The platform runs at `http://localhost:3001`. The admin dashboard is served at the same URL.
+The platform runs at `http://localhost:3001`. Open it to create your CRM admin account.
 
 For development:
 

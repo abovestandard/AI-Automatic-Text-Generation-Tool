@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import { AI_MODELS, extractVariables } from '@ai-content/core';
 import { prisma } from '../db';
 import { generateContent } from '../services/generation';

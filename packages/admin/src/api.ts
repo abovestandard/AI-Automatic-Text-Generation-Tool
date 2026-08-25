@@ -53,7 +53,6 @@ export const api = {
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
 
   getPrompts: (projectId: string) => request<Prompt[]>(`/projects/${projectId}/prompts`),
-  getPrompt: (id: string) => request<Prompt>(`/prompts/${id}`),
   createPrompt: (projectId: string, data: Partial<Prompt>) => request<Prompt>(`/projects/${projectId}/prompts`, { method: 'POST', body: JSON.stringify(data) }),
   updatePrompt: (id: string, data: Partial<Prompt>) => request<Prompt>(`/prompts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deletePrompt: (id: string) => request<void>(`/prompts/${id}`, { method: 'DELETE' }),
@@ -63,12 +62,9 @@ export const api = {
     return request<FieldMapping[]>(`/projects/${projectId}/mappings${q}`);
   },
   createMapping: (projectId: string, data: Partial<FieldMapping>) => request<FieldMapping>(`/projects/${projectId}/mappings`, { method: 'POST', body: JSON.stringify(data) }),
-  updateMapping: (id: string, data: Partial<FieldMapping>) => request<FieldMapping>(`/mappings/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMapping: (id: string) => request<void>(`/mappings/${id}`, { method: 'DELETE' }),
 
-  generate: (data: Record<string, unknown>) => request<GenerationResult>('/generate', { method: 'POST', body: JSON.stringify(data) }),
   getModels: () => request<AIModel[]>('/models'),
-  getBulkJobs: (projectId: string) => request<BulkJob[]>(`/projects/${projectId}/bulk-jobs`),
 };
 
 export interface AuthUser {
@@ -168,20 +164,4 @@ export interface FieldMapping {
   targetSelector?: string;
   contentType?: string;
   termTaxonomy?: string;
-}
-
-export interface GenerationResult {
-  id: string;
-  status: string;
-  generatedContent: Record<string, string>;
-  mappedFields: Array<{ aiOutputKey: string; targetField: string; value: string; applied: boolean; skippedReason?: string }>;
-  error?: string;
-  tokensUsed?: number;
-}
-
-export interface BulkJob {
-  id: string;
-  name: string;
-  status: string;
-  stats?: { total: number; completed: number; processing: number; pending: number; failed: number };
 }

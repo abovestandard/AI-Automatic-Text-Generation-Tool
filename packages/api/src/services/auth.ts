@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../db';
 
 export type UserRole = 'super_admin' | 'website_admin' | 'editor' | 'viewer';
@@ -168,12 +167,4 @@ export async function userCanAccessProject(user: AuthUser, projectId: string): P
 export function userCanManageWebsite(user: AuthUser, websiteId: string): boolean {
   if (user.isSuperAdmin) return true;
   return user.rolesByWebsite[websiteId] === 'website_admin';
-}
-
-export async function getProjectWebsiteId(projectId: string): Promise<string | null> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { websiteId: true },
-  });
-  return project?.websiteId ?? null;
 }

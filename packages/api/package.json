@@ -14,9 +14,6 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx src/seed.ts"
   },
-  "prisma": {
-    "seed": "tsx src/seed.ts"
-  },
   "dependencies": {
     "@ai-content/core": "*",
     "@prisma/client": "6.19.0",
@@ -24,8 +21,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.19.0",
     "openai": "^4.52.0",
-    "@google/generative-ai": "^0.21.0",
-    "uuid": "^11.1.0"
+    "@google/generative-ai": "^0.21.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

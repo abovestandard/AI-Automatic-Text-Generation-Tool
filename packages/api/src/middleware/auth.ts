@@ -62,45 +62,6 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   next();
 }
 
-export async function optionalAuthenticate(req: Request, _res: Response, next: NextFunction): Promise<void> {
-  const token = getBearerToken(req);
-  if (!token) {
-    next();
-    return;
-  }
-
-  if (token.startsWith('aica_')) {
-    const site = await authenticateSiteKey(token);
-    if (site) {
-      req.auth = {
-        type: 'site',
-        websiteId: site.websiteId,
-        projectId: site.projectId,
-        siteKeyId: site.siteKeyId,
-      };
-    }
-    next();
-    return;
-  }
-
-  const payload = verifyToken(token);
-  if (payload?.sub) {
-    const user = await loadAuthUser(String(payload.sub));
-    if (user) {
-      req.auth = {
-        type: 'admin',
-        userId: user.id,
-        email: user.email,
-        name: user.name ?? undefined,
-        isSuperAdmin: user.isSuperAdmin,
-        websiteIds: user.websiteIds,
-        rolesByWebsite: user.rolesByWebsite,
-      };
-    }
-  }
-  next();
-}
-
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   if (req.auth?.type !== 'admin') {
     res.status(401).json({ error: 'Admin authentication required' });

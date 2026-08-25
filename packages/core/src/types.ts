@@ -72,15 +72,6 @@ export interface FieldMapping {
   termTaxonomy?: string;
 }
 
-export interface SourceFieldConfig {
-  key: string;
-  label: string;
-  sourceType: 'post_field' | 'term_field' | 'acf' | 'meta' | 'featured_image' | 'custom';
-  sourceField: string;
-  includeInPrompt: boolean;
-  sendAsImage: boolean;
-}
-
 export interface GenerationRequest {
   projectId: string;
   promptId: string;
@@ -156,27 +147,4 @@ export interface BulkJobItem {
   error?: string;
   generationResultId?: string;
   retryCount: number;
-}
-
-export interface WordPressPost {
-  id: number;
-  title: string;
-  content: string;
-  excerpt: string;
-  status: string;
-  type: string;
-  featured_media?: number;
-  meta?: Record<string, unknown>;
-  acf?: Record<string, unknown>;
-}
-
-export interface WordPressTerm {
-  id: number;
-  name: string;
-  slug: string;
-  description: string;
-  taxonomy: string;
-  parent: number;
-  meta?: Record<string, unknown>;
-  acf?: Record<string, unknown>;
 }
