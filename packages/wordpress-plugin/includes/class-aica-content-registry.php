@@ -76,17 +76,26 @@ class AICA_Content_Registry {
         }, $posts);
     }
 
-    public static function get_terms(string $taxonomy, int $limit = 200, string $search = ''): array {
+    public static function get_terms(string $taxonomy, int $limit = 0, string $search = ''): array {
+        if (!taxonomy_exists($taxonomy)) {
+            return [];
+        }
+
         $args = [
-            'taxonomy'   => $taxonomy,
-            'hide_empty' => false,
-            'number'     => $limit,
-            'orderby'    => 'name',
-            'order'      => 'ASC',
+            'taxonomy'         => $taxonomy,
+            'hide_empty'       => false,
+            'orderby'          => 'name',
+            'order'            => 'ASC',
+            'child_of'         => 0,
+            'suppress_filters' => true,
         ];
 
         if ($search !== '') {
             $args['search'] = $search;
+        }
+
+        if ($limit > 0) {
+            $args['number'] = $limit;
         }
 
         $terms = get_terms($args);
@@ -95,16 +104,88 @@ class AICA_Content_Registry {
             return [];
         }
 
+        $terms = array_values(array_filter($terms, static function ($term) use ($taxonomy) {
+            return $term->taxonomy === $taxonomy;
+        }));
+
+        $terms = self::sort_terms_hierarchically($terms, $taxonomy);
+
         return array_map(function ($term) use ($taxonomy) {
+            $depth = (int) ($term->aica_depth ?? 0);
+            $indent = $depth > 0 ? str_repeat('— ', $depth) : '';
+
             return [
-                'id'     => $term->term_id,
-                'label'  => $term->name,
-                'status' => $term->count > 0 ? 'has_posts' : 'empty',
-                'kind'   => 'taxonomy',
-                'slug'   => $taxonomy,
-                'editUrl' => get_edit_term_link($term->term_id, $taxonomy, 'raw'),
+                'id'       => $term->term_id,
+                'label'    => $indent . $term->name,
+                'name'     => $term->name,
+                'status'   => $term->count > 0 ? 'has_posts' : 'empty',
+                'kind'     => 'taxonomy',
+                'slug'     => $taxonomy,
+                'parentId' => (int) $term->parent,
+                'depth'    => $depth,
+                'editUrl'  => get_edit_term_link($term->term_id, $taxonomy, 'raw'),
             ];
         }, $terms);
+    }
+
+    /**
+     * Order terms parent-first with children directly under their parent.
+     *
+     * @param WP_Term[] $terms
+     * @return WP_Term[]
+     */
+    private static function sort_terms_hierarchically(array $terms, string $taxonomy): array {
+        if (empty($terms)) {
+            return [];
+        }
+
+        if (!is_taxonomy_hierarchical($taxonomy)) {
+            foreach ($terms as $term) {
+                $term->aica_depth = 0;
+            }
+            return $terms;
+        }
+
+        $by_parent = [];
+        foreach ($terms as $term) {
+            $parent_id = (int) $term->parent;
+            if (!isset($by_parent[$parent_id])) {
+                $by_parent[$parent_id] = [];
+            }
+            $by_parent[$parent_id][] = $term;
+        }
+
+        foreach ($by_parent as &$siblings) {
+            usort($siblings, static function ($a, $b) {
+                return strcasecmp($a->name, $b->name);
+            });
+        }
+        unset($siblings);
+
+        $sorted = [];
+        $walk = static function (int $parent_id, int $depth) use (&$walk, &$sorted, $by_parent): void {
+            foreach ($by_parent[$parent_id] ?? [] as $term) {
+                $term->aica_depth = $depth;
+                $sorted[] = $term;
+                $walk((int) $term->term_id, $depth + 1);
+            }
+        };
+
+        $walk(0, 0);
+
+        $included = [];
+        foreach ($sorted as $term) {
+            $included[$term->term_id] = true;
+        }
+
+        foreach ($terms as $term) {
+            if (!isset($included[$term->term_id])) {
+                $term->aica_depth = 0;
+                $sorted[] = $term;
+            }
+        }
+
+        return $sorted;
     }
 
     public static function parse_content_type(string $value): ?array {

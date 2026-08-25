@@ -777,6 +777,14 @@
         $('#aica-bulk-apply-hint').text(hints[mode] || '');
     }
 
+    function formatBulkItemStatus(item) {
+        const depth = Number(item.depth) || 0;
+        const hasPosts = item.status === 'has_posts';
+        const level = depth > 0 ? `Child (level ${depth})` : 'Parent';
+        const posts = hasPosts ? 'has posts' : 'empty';
+        return `${level} · ${posts}`;
+    }
+
     function loadBulkItems(contentType) {
         const $tbody = $('#aica-bulk-items-tbody');
         const parsed = parseContentType(contentType);
@@ -787,8 +795,14 @@
         }).then(function (items) {
             $tbody.empty();
             (items || []).forEach(function (item) {
+                const depth = Number(item.depth) || 0;
+                const statusLabel = formatBulkItemStatus(item);
+                const nameCell = depth > 0
+                    ? `<td class="aica-bulk-term-child" style="padding-left:${12 + depth * 18}px">${escapeHtml(item.itemLabel)}</td>`
+                    : `<td>${escapeHtml(item.itemLabel)}</td>`;
+
                 $tbody.append(
-                    `<tr>
+                    `<tr class="${depth > 0 ? 'aica-bulk-term-child-row' : ''}">
                         <th scope="row" class="check-column">
                             <input type="checkbox" value="${item.itemId}"
                                 data-label="${escapeHtml(item.itemLabel)}"
@@ -797,8 +811,8 @@
                                 data-post-type="${escapeHtml(item.postType || '')}"
                                 data-edit-url="${escapeHtml(item.editUrl || '')}" />
                         </th>
-                        <td>${escapeHtml(item.itemLabel)}</td>
-                        <td>${escapeHtml(item.status || '')}</td>
+                        ${nameCell}
+                        <td>${escapeHtml(statusLabel)}</td>
                     </tr>`
                 );
             });

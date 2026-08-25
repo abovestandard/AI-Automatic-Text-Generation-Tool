@@ -6,13 +6,15 @@ class AICA_Bulk_Processor {
     private const OPTION_KEY = 'aica_bulk_jobs';
     private const MAX_JOBS   = 20;
 
-    public static function get_items_for_type(string $content_type, int $limit = 200): array {
+    public static function get_items_for_type(string $content_type, int $limit = 0): array {
         $parsed = AICA_Content_Registry::parse_content_type($content_type);
         if (!$parsed) {
             return [];
         }
 
-        $items = AICA_Content_Registry::get_items($parsed['kind'], $parsed['slug'], $limit);
+        // Taxonomies load all terms (parents + children); post types keep a sensible cap.
+        $fetch_limit = $parsed['kind'] === 'taxonomy' ? 0 : ($limit > 0 ? $limit : 200);
+        $items = AICA_Content_Registry::get_items($parsed['kind'], $parsed['slug'], $fetch_limit);
 
         return array_map(function ($item) use ($parsed) {
             $item_type = $parsed['kind'] === 'taxonomy' ? 'term' : 'post';
@@ -25,6 +27,8 @@ class AICA_Bulk_Processor {
                 'taxonomy'  => $taxonomy,
                 'postType'  => $parsed['kind'] === 'post_type' ? $parsed['slug'] : '',
                 'status'    => $item['status'] ?? '',
+                'parentId'  => $item['parentId'] ?? 0,
+                'depth'     => $item['depth'] ?? 0,
                 'editUrl'   => $item['editUrl'] ?? '',
             ];
         }, $items);
