@@ -12,72 +12,51 @@ import type {
   FieldMapping,
 } from '@ai-content/core';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb } from '../db';
+import { prisma } from '../db';
 import { completeAI } from './ai-providers';
-
-interface PromptRow {
-  id: string;
-  project_id: string;
-  name: string;
-  description: string | null;
-  system_prompt: string;
-  user_prompt_template: string;
-  output_fields: string;
-  model: string | null;
-  supports_vision: number;
-  response_format: string;
-  variables: string;
-}
-
-interface ProjectRow {
-  id: string;
-  openai_api_key: string | null;
-  gemini_api_key: string | null;
-  default_model: string;
-}
+import type { Prompt as PromptRow } from '@prisma/client';
 
 function rowToPrompt(row: PromptRow): Prompt {
   return {
     id: row.id,
-    projectId: row.project_id,
+    projectId: row.projectId,
     name: row.name,
     description: row.description ?? undefined,
-    systemPrompt: row.system_prompt,
-    userPromptTemplate: row.user_prompt_template,
-    outputFields: JSON.parse(row.output_fields),
+    systemPrompt: row.systemPrompt,
+    userPromptTemplate: row.userPromptTemplate,
+    outputFields: row.outputFields as unknown as Prompt['outputFields'],
     model: row.model ?? undefined,
-    supportsVision: row.supports_vision === 1,
-    responseFormat: row.response_format as 'json' | 'text',
-    variables: JSON.parse(row.variables),
-    createdAt: '',
-    updatedAt: '',
+    supportsVision: row.supportsVision,
+    responseFormat: row.responseFormat as 'json' | 'text',
+    variables: row.variables as string[],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
 export async function generateContent(
   request: GenerationRequest
 ): Promise<GenerationResult> {
-  const db = getDb();
   const resultId = uuidv4();
 
-  const promptRow = db
-    .prepare('SELECT * FROM prompts WHERE id = ? AND project_id = ?')
-    .get(request.promptId, request.projectId) as PromptRow | undefined;
+  const promptRow = await prisma.prompt.findFirst({
+    where: { id: request.promptId, projectId: request.projectId },
+  });
 
   if (!promptRow) {
     return errorResult(resultId, request, 'Prompt not found');
   }
 
-  const projectRow = db
-    .prepare('SELECT * FROM projects WHERE id = ?')
-    .get(request.projectId) as ProjectRow | undefined;
+  const projectRow = await prisma.project.findUnique({
+    where: { id: request.projectId },
+  });
 
   if (!projectRow) {
     return errorResult(resultId, request, 'Project not found');
   }
 
   const prompt = rowToPrompt(promptRow);
-  const model = resolveModelId(prompt.model || projectRow.default_model || 'gemini-3.6-flash');
+  const model = resolveModelId(prompt.model || projectRow.defaultModel || 'gemini-3.6-flash');
 
   if (request.acfAuto && !request.acfSchema?.outputFields?.length) {
     return errorResult(
@@ -113,8 +92,8 @@ export async function generateContent(
       userPrompt: fullUserPrompt,
       responseFormat: prompt.responseFormat,
       images,
-      openaiApiKey: projectRow.openai_api_key || process.env.OPENAI_API_KEY,
-      geminiApiKey: projectRow.gemini_api_key || process.env.GEMINI_API_KEY,
+      openaiApiKey: projectRow.openaiApiKey || process.env.OPENAI_API_KEY,
+      geminiApiKey: projectRow.geminiApiKey || process.env.GEMINI_API_KEY,
     });
 
     const rawResponse = completion.content;
@@ -135,30 +114,20 @@ export async function generateContent(
       generatedContent = { content: rawResponse };
     }
 
-    const mappingRows = db
-      .prepare('SELECT * FROM field_mappings WHERE prompt_id = ?')
-      .all(request.promptId) as Array<{
-      id: string;
-      project_id: string;
-      prompt_id: string;
-      ai_output_key: string;
-      target_type: string;
-      target_field: string;
-      target_selector: string | null;
-      content_type: string | null;
-      term_taxonomy: string | null;
-    }>;
+    const mappingRows = await prisma.fieldMapping.findMany({
+      where: { promptId: request.promptId },
+    });
 
     const mappings: FieldMapping[] = mappingRows.map((r) => ({
       id: r.id,
-      projectId: r.project_id,
-      promptId: r.prompt_id,
-      aiOutputKey: r.ai_output_key,
-      targetType: r.target_type as FieldMapping['targetType'],
-      targetField: r.target_field,
-      targetSelector: r.target_selector ?? undefined,
-      contentType: r.content_type ?? undefined,
-      termTaxonomy: r.term_taxonomy ?? undefined,
+      projectId: r.projectId,
+      promptId: r.promptId,
+      aiOutputKey: r.aiOutputKey,
+      targetType: r.targetType as FieldMapping['targetType'],
+      targetField: r.targetField,
+      targetSelector: r.targetSelector ?? undefined,
+      contentType: r.contentType ?? undefined,
+      termTaxonomy: r.termTaxonomy ?? undefined,
     }));
 
     const autoMappings: FieldMapping[] = useAcfAuto
@@ -195,23 +164,20 @@ export async function generateContent(
       acfFieldCount: useAcfAuto ? outputFields.length : undefined,
     };
 
-    db.prepare(`
-      INSERT INTO generation_results
-        (id, project_id, prompt_id, item_id, item_type, status, generated_content, mapped_fields, raw_response, tokens_used, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      resultId,
-      request.projectId,
-      request.promptId,
-      String(request.itemId),
-      request.itemType,
-      'success',
-      JSON.stringify(generatedContent),
-      JSON.stringify(mappedFields),
-      rawResponse,
-      result.tokensUsed ?? null,
-      result.createdAt
-    );
+    await prisma.generationResult.create({
+      data: {
+        id: resultId,
+        projectId: request.projectId,
+        promptId: request.promptId,
+        itemId: String(request.itemId),
+        itemType: request.itemType,
+        status: 'success',
+        generatedContent: generatedContent as object,
+        mappedFields: mappedFields as object,
+        rawResponse,
+        tokensUsed: result.tokensUsed ?? null,
+      },
+    });
 
     return result;
   } catch (err) {
@@ -235,12 +201,11 @@ function extractExistingValues(sourceData: Record<string, unknown>): Record<stri
   return values;
 }
 
-function errorResult(
+async function errorResult(
   id: string,
   request: GenerationRequest,
   error: string
-): GenerationResult {
-  const db = getDb();
+): Promise<GenerationResult> {
   const result: GenerationResult = {
     id,
     requestId: id,
@@ -251,20 +216,17 @@ function errorResult(
     createdAt: new Date().toISOString(),
   };
 
-  db.prepare(`
-    INSERT INTO generation_results
-      (id, project_id, prompt_id, item_id, item_type, status, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    request.projectId,
-    request.promptId,
-    String(request.itemId),
-    request.itemType,
-    'error',
-    error,
-    result.createdAt
-  );
+  await prisma.generationResult.create({
+    data: {
+      id,
+      projectId: request.projectId,
+      promptId: request.promptId,
+      itemId: String(request.itemId),
+      itemType: request.itemType,
+      status: 'error',
+      error,
+    },
+  });
 
   return result;
 }

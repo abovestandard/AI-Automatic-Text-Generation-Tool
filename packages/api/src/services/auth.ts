@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb } from '../db';
+import { prisma } from '../db';
 
 export type UserRole = 'super_admin' | 'website_admin' | 'editor' | 'viewer';
 
@@ -69,10 +69,8 @@ export function hashSiteApiKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
 
-export function getUserCount(): number {
-  const db = getDb();
-  const row = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-  return row.count;
+export async function getUserCount(): Promise<number> {
+  return prisma.user.count();
 }
 
 export async function createUser(
@@ -81,77 +79,74 @@ export async function createUser(
   name: string,
   isSuperAdmin = false
 ): Promise<{ id: string; email: string; name: string }> {
-  const db = getDb();
-  const id = uuidv4();
-  const now = new Date().toISOString();
   const passwordHash = await hashPassword(password);
-  db.prepare(`
-    INSERT INTO users (id, email, password_hash, name, is_super_admin, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, email.toLowerCase(), passwordHash, name, isSuperAdmin ? 1 : 0, now, now);
-  return { id, email: email.toLowerCase(), name };
+  const user = await prisma.user.create({
+    data: {
+      email: email.toLowerCase(),
+      passwordHash,
+      name,
+      isSuperAdmin,
+    },
+  });
+  return { id: user.id, email: user.email, name: user.name ?? name };
 }
 
 export async function authenticateUser(email: string, password: string): Promise<AuthUser | null> {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as Record<string, unknown> | undefined;
+  const row = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
   if (!row) return null;
-  const valid = await verifyPassword(password, String(row.password_hash));
+  const valid = await verifyPassword(password, row.passwordHash);
   if (!valid) return null;
-  return loadAuthUser(String(row.id));
+  return loadAuthUser(row.id);
 }
 
-export function loadAuthUser(userId: string): AuthUser | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as Record<string, unknown> | undefined;
+export async function loadAuthUser(userId: string): Promise<AuthUser | null> {
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { memberships: true },
+  });
   if (!row) return null;
-
-  const memberships = db.prepare(`
-    SELECT website_id, role FROM memberships WHERE user_id = ?
-  `).all(userId) as Array<{ website_id: string; role: string }>;
 
   const websiteIds: string[] = [];
   const rolesByWebsite: Record<string, UserRole> = {};
-  for (const m of memberships) {
-    websiteIds.push(m.website_id);
-    rolesByWebsite[m.website_id] = m.role as UserRole;
+  for (const m of row.memberships) {
+    websiteIds.push(m.websiteId);
+    rolesByWebsite[m.websiteId] = m.role as UserRole;
   }
 
   return {
-    id: String(row.id),
-    email: String(row.email),
-    name: row.name ? String(row.name) : null,
-    isSuperAdmin: row.is_super_admin === 1,
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    isSuperAdmin: row.isSuperAdmin,
     websiteIds,
     rolesByWebsite,
   };
 }
 
-export function authenticateSiteKey(key: string): {
+export async function authenticateSiteKey(key: string): Promise<{
   websiteId: string;
   projectId: string;
   siteKeyId: string;
-} | null {
+} | null> {
   if (!key.startsWith(SITE_KEY_PREFIX)) return null;
-  const db = getDb();
+
   const keyHash = hashSiteApiKey(key);
-  const row = db.prepare(`
-    SELECT sak.id, sak.website_id, sak.revoked_at, w.default_project_id
-    FROM site_api_keys sak
-    JOIN websites w ON w.id = sak.website_id
-    WHERE sak.key_hash = ?
-  `).get(keyHash) as Record<string, unknown> | undefined;
+  const row = await prisma.siteApiKey.findUnique({
+    where: { keyHash },
+    include: { website: true },
+  });
 
-  if (!row || row.revoked_at) return null;
-  if (!row.default_project_id) return null;
+  if (!row || row.revokedAt || !row.website.defaultProjectId) return null;
 
-  const now = new Date().toISOString();
-  db.prepare('UPDATE site_api_keys SET last_used_at = ? WHERE id = ?').run(now, String(row.id));
+  await prisma.siteApiKey.update({
+    where: { id: row.id },
+    data: { lastUsedAt: new Date() },
+  });
 
   return {
-    websiteId: String(row.website_id),
-    projectId: String(row.default_project_id),
-    siteKeyId: String(row.id),
+    websiteId: row.websiteId,
+    projectId: row.website.defaultProjectId,
+    siteKeyId: row.id,
   };
 }
 
@@ -160,22 +155,25 @@ export function userCanAccessWebsite(user: AuthUser, websiteId: string): boolean
   return user.websiteIds.includes(websiteId);
 }
 
-export function userCanAccessProject(user: AuthUser, projectId: string): boolean {
+export async function userCanAccessProject(user: AuthUser, projectId: string): Promise<boolean> {
   if (user.isSuperAdmin) return true;
-  const db = getDb();
-  const row = db.prepare('SELECT website_id FROM projects WHERE id = ?').get(projectId) as { website_id: string } | undefined;
-  if (!row?.website_id) return false;
-  return user.websiteIds.includes(row.website_id);
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { websiteId: true },
+  });
+  if (!project?.websiteId) return false;
+  return user.websiteIds.includes(project.websiteId);
 }
 
 export function userCanManageWebsite(user: AuthUser, websiteId: string): boolean {
   if (user.isSuperAdmin) return true;
-  const role = user.rolesByWebsite[websiteId];
-  return role === 'website_admin';
+  return user.rolesByWebsite[websiteId] === 'website_admin';
 }
 
-export function getProjectWebsiteId(projectId: string): string | null {
-  const db = getDb();
-  const row = db.prepare('SELECT website_id FROM projects WHERE id = ?').get(projectId) as { website_id: string } | undefined;
-  return row?.website_id ?? null;
+export async function getProjectWebsiteId(projectId: string): Promise<string | null> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { websiteId: true },
+  });
+  return project?.websiteId ?? null;
 }

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { AI_MODELS, extractVariables } from '@ai-content/core';
-import { getDb } from '../db';
+import { prisma } from '../db';
 import { generateContent } from '../services/generation';
 import { createBulkJob, getBulkJob, processBulkJob, retryFailedItems, getJobStats } from '../services/bulk-queue';
 import {
@@ -11,285 +11,265 @@ import {
   requireProjectAccess,
   blockSiteKey,
   getAdminUser,
+  canAccessProject,
 } from '../middleware/auth';
-import { userCanAccessProject } from '../services/auth';
+import {
+  formatProject,
+  formatPrompt,
+  formatMapping,
+  formatGenerationResult,
+  formatBulkJobRow,
+} from '../lib/formatters';
 
 export const apiRouter = Router();
 
-// Public models list (no sensitive data)
 apiRouter.get('/models', (_req: Request, res: Response) => {
   res.json(AI_MODELS);
 });
 
-// Site context for WordPress plugin (site API key only)
 apiRouter.get('/site/context', authenticate, requireAdminOrSiteKey, (req: Request, res: Response) => {
   if (req.auth?.type !== 'site') {
     res.status(403).json({ error: 'Site API key required' });
     return;
   }
 
-  const websiteId = req.auth.websiteId!;
-  const projectId = req.auth.projectId!;
-
-  const db = getDb();
-  const website = db.prepare('SELECT * FROM websites WHERE id = ?').get(websiteId) as Record<string, unknown> | undefined;
-  if (!website) {
-    res.status(404).json({ error: 'Website not found' });
-    return;
-  }
-
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Record<string, unknown> | undefined;
-
-  res.json({
-    websiteId: website.id,
-    websiteName: website.name,
-    projectId,
-    projectName: project?.name,
-    domain: website.domain,
+  prisma.website.findUnique({
+    where: { id: req.auth.websiteId! },
+    include: { projects: { where: { id: req.auth.projectId! } } },
+  }).then((website) => {
+    if (!website) {
+      res.status(404).json({ error: 'Website not found' });
+      return;
+    }
+    const project = website.projects[0];
+    res.json({
+      websiteId: website.id,
+      websiteName: website.name,
+      projectId: req.auth!.projectId,
+      projectName: project?.name,
+      domain: website.domain,
+    });
+  }).catch((err) => {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to load context' });
   });
 });
 
-// All routes below require authentication
 apiRouter.use(authenticate);
 
 // ─── Projects ───────────────────────────────────────────────
 
-apiRouter.get('/projects', requireAdmin, (req: Request, res: Response) => {
-  const db = getDb();
+apiRouter.get('/projects', requireAdmin, async (req: Request, res: Response) => {
   const user = getAdminUser(req)!;
-
-  let rows: unknown[];
-  if (user.isSuperAdmin) {
-    rows = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
-  } else if (user.websiteIds.length === 0) {
-    rows = [];
-  } else {
-    const placeholders = user.websiteIds.map(() => '?').join(',');
-    rows = db.prepare(`SELECT * FROM projects WHERE website_id IN (${placeholders}) ORDER BY created_at DESC`).all(...user.websiteIds);
-  }
+  const rows = user.isSuperAdmin
+    ? await prisma.project.findMany({ orderBy: { createdAt: 'desc' } })
+    : user.websiteIds.length === 0
+      ? []
+      : await prisma.project.findMany({
+          where: { websiteId: { in: user.websiteIds } },
+          orderBy: { createdAt: 'desc' },
+        });
   res.json(rows.map(formatProject));
 });
 
-apiRouter.get('/projects/:id', requireAdminOrSiteKey, requireProjectAccess('id'), (req: Request, res: Response) => {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+apiRouter.get('/projects/:id', requireAdminOrSiteKey, requireProjectAccess('id'), async (req: Request, res: Response) => {
+  const row = await prisma.project.findUnique({ where: { id: req.params.id } });
   if (!row) return res.status(404).json({ error: 'Project not found' });
   res.json(formatProject(row));
 });
 
-apiRouter.post('/projects', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
-  const db = getDb();
+apiRouter.post('/projects', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
   const user = getAdminUser(req)!;
-  const id = uuidv4();
-  const now = new Date().toISOString();
   const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, geminiApiKey, defaultModel, defaultLanguage, websiteId } = req.body;
 
   if (!websiteId) {
     res.status(400).json({ error: 'websiteId is required' });
     return;
   }
-
   if (!user.isSuperAdmin && !user.websiteIds.includes(websiteId)) {
     res.status(403).json({ error: 'Access denied to this website' });
     return;
   }
 
-  db.prepare(`
-    INSERT INTO projects (id, name, description, wordpress_url, wordpress_api_key, openai_api_key, gemini_api_key, default_model, default_language, website_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, description || null, wordpressUrl || null, wordpressApiKey || null, openaiApiKey || null, geminiApiKey || null, defaultModel || 'gemini-3.6-flash', defaultLanguage || 'en', websiteId, now, now);
-
-  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  const row = await prisma.project.create({
+    data: {
+      name,
+      description: description || null,
+      wordpressUrl: wordpressUrl || null,
+      wordpressApiKey: wordpressApiKey || null,
+      openaiApiKey: openaiApiKey || null,
+      geminiApiKey: geminiApiKey || null,
+      defaultModel: defaultModel || 'gemini-3.6-flash',
+      defaultLanguage: defaultLanguage || 'en',
+      websiteId,
+    },
+  });
   res.status(201).json(formatProject(row));
 });
 
-apiRouter.put('/projects/:id', requireAdmin, blockSiteKey, requireProjectAccess('id'), (req: Request, res: Response) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+apiRouter.put('/projects/:id', requireAdmin, blockSiteKey, requireProjectAccess('id'), async (req: Request, res: Response) => {
+  const existing = await prisma.project.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Project not found' });
 
   const { name, description, wordpressUrl, wordpressApiKey, openaiApiKey, geminiApiKey, defaultModel, defaultLanguage } = req.body;
-  const now = new Date().toISOString();
-  const ex = existing as Record<string, unknown>;
 
-  const updatedOpenaiKey = openaiApiKey !== undefined && openaiApiKey !== ''
-    ? openaiApiKey
-    : (ex.openai_api_key as string | null);
-  const updatedGeminiKey = geminiApiKey !== undefined && geminiApiKey !== ''
-    ? geminiApiKey
-    : (ex.gemini_api_key as string | null);
-
-  db.prepare(`
-    UPDATE projects SET name = ?, description = ?, wordpress_url = ?, wordpress_api_key = ?,
-    openai_api_key = ?, gemini_api_key = ?, default_model = ?, default_language = ?, updated_at = ? WHERE id = ?
-  `).run(
-    name ?? ex.name,
-    description !== undefined ? description : ex.description,
-    wordpressUrl !== undefined ? wordpressUrl : ex.wordpress_url,
-    wordpressApiKey !== undefined ? wordpressApiKey : ex.wordpress_api_key,
-    updatedOpenaiKey,
-    updatedGeminiKey,
-    defaultModel ?? ex.default_model,
-    defaultLanguage ?? ex.default_language,
-    now,
-    req.params.id
-  );
-
-  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  const row = await prisma.project.update({
+    where: { id: req.params.id },
+    data: {
+      name: name ?? existing.name,
+      description: description !== undefined ? description : existing.description,
+      wordpressUrl: wordpressUrl !== undefined ? wordpressUrl : existing.wordpressUrl,
+      wordpressApiKey: wordpressApiKey !== undefined ? wordpressApiKey : existing.wordpressApiKey,
+      openaiApiKey: openaiApiKey !== undefined && openaiApiKey !== '' ? openaiApiKey : existing.openaiApiKey,
+      geminiApiKey: geminiApiKey !== undefined && geminiApiKey !== '' ? geminiApiKey : existing.geminiApiKey,
+      defaultModel: defaultModel ?? existing.defaultModel,
+      defaultLanguage: defaultLanguage ?? existing.defaultLanguage,
+    },
+  });
   res.json(formatProject(row));
 });
 
-apiRouter.delete('/projects/:id', requireAdmin, blockSiteKey, requireProjectAccess('id'), (req: Request, res: Response) => {
-  const db = getDb();
-  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+apiRouter.delete('/projects/:id', requireAdmin, blockSiteKey, requireProjectAccess('id'), async (req: Request, res: Response) => {
+  await prisma.project.delete({ where: { id: req.params.id } });
   res.status(204).end();
 });
 
 // ─── Prompts ────────────────────────────────────────────────
 
-apiRouter.get('/projects/:projectId/prompts', requireAdminOrSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM prompts WHERE project_id = ? ORDER BY created_at DESC').all(req.params.projectId);
+apiRouter.get('/projects/:projectId/prompts', requireAdminOrSiteKey, requireProjectAccess('projectId'), async (req: Request, res: Response) => {
+  const rows = await prisma.prompt.findMany({
+    where: { projectId: req.params.projectId },
+    orderBy: { createdAt: 'desc' },
+  });
   res.json(rows.map(formatPrompt));
 });
 
-apiRouter.get('/prompts/:id', requireAdminOrSiteKey, (req: Request, res: Response) => {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+apiRouter.get('/prompts/:id', requireAdminOrSiteKey, async (req: Request, res: Response) => {
+  const row = await prisma.prompt.findUnique({ where: { id: req.params.id } });
   if (!row) return res.status(404).json({ error: 'Prompt not found' });
-
-  if (!canAccessPrompt(req, String(row.project_id))) {
+  if (!(await canAccessProject(req, row.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
   res.json(formatPrompt(row));
 });
 
-apiRouter.post('/projects/:projectId/prompts', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
-  const db = getDb();
-  const id = uuidv4();
-  const now = new Date().toISOString();
+apiRouter.post('/projects/:projectId/prompts', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), async (req: Request, res: Response) => {
   const { name, description, systemPrompt, userPromptTemplate, outputFields, model, supportsVision, responseFormat } = req.body;
-
   const variables = extractVariables(systemPrompt + ' ' + userPromptTemplate);
 
-  db.prepare(`
-    INSERT INTO prompts (id, project_id, name, description, system_prompt, user_prompt_template, output_fields, model, supports_vision, response_format, variables, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id, req.params.projectId, name, description || null, systemPrompt, userPromptTemplate,
-    JSON.stringify(outputFields || []), model || null, supportsVision ? 1 : 0,
-    responseFormat || 'json', JSON.stringify(variables), now, now
-  );
-
-  const row = db.prepare('SELECT * FROM prompts WHERE id = ?').get(id);
+  const row = await prisma.prompt.create({
+    data: {
+      projectId: req.params.projectId,
+      name,
+      description: description || null,
+      systemPrompt,
+      userPromptTemplate,
+      outputFields: outputFields || [],
+      model: model || null,
+      supportsVision: !!supportsVision,
+      responseFormat: responseFormat || 'json',
+      variables,
+    },
+  });
   res.status(201).json(formatPrompt(row));
 });
 
-apiRouter.put('/prompts/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+apiRouter.put('/prompts/:id', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
+  const existing = await prisma.prompt.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Prompt not found' });
-
-  if (!canAccessPrompt(req, String(existing.project_id))) {
+  if (!(await canAccessProject(req, existing.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
 
   const { name, description, systemPrompt, userPromptTemplate, outputFields, model, supportsVision, responseFormat } = req.body;
-  const now = new Date().toISOString();
-  const sysPrompt = systemPrompt ?? existing.system_prompt;
-  const userPrompt = userPromptTemplate ?? existing.user_prompt_template;
+  const sysPrompt = systemPrompt ?? existing.systemPrompt;
+  const userPrompt = userPromptTemplate ?? existing.userPromptTemplate;
   const variables = extractVariables(String(sysPrompt) + ' ' + String(userPrompt));
 
-  db.prepare(`
-    UPDATE prompts SET name = ?, description = ?, system_prompt = ?, user_prompt_template = ?,
-    output_fields = ?, model = ?, supports_vision = ?, response_format = ?, variables = ?, updated_at = ?
-    WHERE id = ?
-  `).run(
-    name ?? existing.name, description ?? existing.description, sysPrompt, userPrompt,
-    JSON.stringify(outputFields ?? JSON.parse(String(existing.output_fields))),
-    model ?? (existing.model as string | null),
-    supportsVision !== undefined ? (supportsVision ? 1 : 0) : (existing.supports_vision as number),
-    responseFormat ?? existing.response_format, JSON.stringify(variables), now, req.params.id
-  );
-
-  const row = db.prepare('SELECT * FROM prompts WHERE id = ?').get(req.params.id);
+  const row = await prisma.prompt.update({
+    where: { id: req.params.id },
+    data: {
+      name: name ?? existing.name,
+      description: description ?? existing.description,
+      systemPrompt: sysPrompt,
+      userPromptTemplate: userPrompt,
+      outputFields: outputFields ?? existing.outputFields,
+      model: model ?? existing.model,
+      supportsVision: supportsVision !== undefined ? !!supportsVision : existing.supportsVision,
+      responseFormat: responseFormat ?? existing.responseFormat,
+      variables,
+    },
+  });
   res.json(formatPrompt(row));
 });
 
-apiRouter.delete('/prompts/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT project_id FROM prompts WHERE id = ?').get(req.params.id) as { project_id: string } | undefined;
+apiRouter.delete('/prompts/:id', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
+  const existing = await prisma.prompt.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Prompt not found' });
-
-  if (!canAccessPrompt(req, existing.project_id)) {
+  if (!(await canAccessProject(req, existing.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
-
-  db.prepare('DELETE FROM prompts WHERE id = ?').run(req.params.id);
+  await prisma.prompt.delete({ where: { id: req.params.id } });
   res.status(204).end();
 });
 
 // ─── Field Mappings ─────────────────────────────────────────
 
-apiRouter.get('/projects/:projectId/mappings', requireAdminOrSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
-  const db = getDb();
+apiRouter.get('/projects/:projectId/mappings', requireAdminOrSiteKey, requireProjectAccess('projectId'), async (req: Request, res: Response) => {
   const { promptId } = req.query;
-  let rows;
-  if (promptId) {
-    rows = db.prepare('SELECT * FROM field_mappings WHERE project_id = ? AND prompt_id = ?').all(req.params.projectId, String(promptId));
-  } else {
-    rows = db.prepare('SELECT * FROM field_mappings WHERE project_id = ?').all(req.params.projectId);
-  }
+  const rows = await prisma.fieldMapping.findMany({
+    where: promptId
+      ? { projectId: req.params.projectId, promptId: String(promptId) }
+      : { projectId: req.params.projectId },
+  });
   res.json(rows.map(formatMapping));
 });
 
-apiRouter.post('/projects/:projectId/mappings', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
-  const db = getDb();
-  const id = uuidv4();
+apiRouter.post('/projects/:projectId/mappings', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), async (req: Request, res: Response) => {
   const { promptId, aiOutputKey, targetType, targetField, targetSelector, contentType, termTaxonomy } = req.body;
-
-  db.prepare(`
-    INSERT INTO field_mappings (id, project_id, prompt_id, ai_output_key, target_type, target_field, target_selector, content_type, term_taxonomy)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, req.params.projectId, promptId, aiOutputKey, targetType, targetField, targetSelector || null, contentType || null, termTaxonomy || null);
-
-  const row = db.prepare('SELECT * FROM field_mappings WHERE id = ?').get(id);
+  const row = await prisma.fieldMapping.create({
+    data: {
+      projectId: req.params.projectId,
+      promptId,
+      aiOutputKey,
+      targetType,
+      targetField,
+      targetSelector: targetSelector || null,
+      contentType: contentType || null,
+      termTaxonomy: termTaxonomy || null,
+    },
+  });
   res.status(201).json(formatMapping(row));
 });
 
-apiRouter.put('/mappings/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT * FROM field_mappings WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+apiRouter.put('/mappings/:id', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
+  const existing = await prisma.fieldMapping.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Mapping not found' });
-
-  if (!canAccessPrompt(req, String(existing.project_id))) {
+  if (!(await canAccessProject(req, existing.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
 
   const { aiOutputKey, targetType, targetField, targetSelector, contentType, termTaxonomy } = req.body;
-  db.prepare(`
-    UPDATE field_mappings SET ai_output_key = ?, target_type = ?, target_field = ?, target_selector = ?, content_type = ?, term_taxonomy = ?
-    WHERE id = ?
-  `).run(
-    aiOutputKey ?? existing.ai_output_key, targetType ?? existing.target_type,
-    targetField ?? existing.target_field, targetSelector ?? existing.target_selector,
-    contentType ?? existing.content_type, termTaxonomy ?? existing.term_taxonomy, req.params.id
-  );
-
-  const row = db.prepare('SELECT * FROM field_mappings WHERE id = ?').get(req.params.id);
+  const row = await prisma.fieldMapping.update({
+    where: { id: req.params.id },
+    data: {
+      aiOutputKey: aiOutputKey ?? existing.aiOutputKey,
+      targetType: targetType ?? existing.targetType,
+      targetField: targetField ?? existing.targetField,
+      targetSelector: targetSelector ?? existing.targetSelector,
+      contentType: contentType ?? existing.contentType,
+      termTaxonomy: termTaxonomy ?? existing.termTaxonomy,
+    },
+  });
   res.json(formatMapping(row));
 });
 
-apiRouter.delete('/mappings/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT project_id FROM field_mappings WHERE id = ?').get(req.params.id) as { project_id: string } | undefined;
+apiRouter.delete('/mappings/:id', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
+  const existing = await prisma.fieldMapping.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Mapping not found' });
-
-  if (!canAccessPrompt(req, existing.project_id)) {
+  if (!(await canAccessProject(req, existing.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
-
-  db.prepare('DELETE FROM field_mappings WHERE id = ?').run(req.params.id);
+  await prisma.fieldMapping.delete({ where: { id: req.params.id } });
   res.status(204).end();
 });
 
@@ -301,18 +281,9 @@ apiRouter.post('/generate', requireAdminOrSiteKey, async (req: Request, res: Res
     res.status(400).json({ error: 'projectId is required' });
     return;
   }
-
-  if (req.auth?.type === 'site' && req.auth.projectId !== projectId) {
+  if (!(await canAccessProject(req, projectId))) {
     res.status(403).json({ error: 'Access denied to this project' });
     return;
-  }
-
-  if (req.auth?.type === 'admin') {
-    const user = getAdminUser(req);
-    if (!user || !userCanAccessProject(user, projectId)) {
-      res.status(403).json({ error: 'Access denied to this project' });
-      return;
-    }
   }
 
   try {
@@ -323,59 +294,37 @@ apiRouter.post('/generate', requireAdminOrSiteKey, async (req: Request, res: Res
   }
 });
 
-apiRouter.get('/results/:id', requireAdminOrSiteKey, (req: Request, res: Response) => {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM generation_results WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+apiRouter.get('/results/:id', requireAdminOrSiteKey, async (req: Request, res: Response) => {
+  const row = await prisma.generationResult.findUnique({ where: { id: req.params.id } });
   if (!row) return res.status(404).json({ error: 'Result not found' });
-
-  if (!canAccessPrompt(req, String(row.project_id))) {
+  if (!(await canAccessProject(req, row.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
-
-  res.json({
-    id: row.id,
-    projectId: row.project_id,
-    promptId: row.prompt_id,
-    itemId: row.item_id,
-    itemType: row.item_type,
-    status: row.status,
-    generatedContent: row.generated_content ? JSON.parse(String(row.generated_content)) : {},
-    mappedFields: row.mapped_fields ? JSON.parse(String(row.mapped_fields)) : [],
-    rawResponse: row.raw_response,
-    error: row.error,
-    tokensUsed: row.tokens_used,
-    createdAt: row.created_at,
-  });
+  res.json(formatGenerationResult(row));
 });
 
 // ─── Bulk Jobs ──────────────────────────────────────────────
 
-apiRouter.post('/projects/:projectId/bulk-jobs', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
+apiRouter.post('/projects/:projectId/bulk-jobs', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), async (req: Request, res: Response) => {
   const { promptId, name, items, applyMode } = req.body;
-  const job = createBulkJob(req.params.projectId, promptId, name, items, applyMode);
+  const job = await createBulkJob(req.params.projectId, promptId, name, items, applyMode);
   res.status(201).json(job);
 });
 
-apiRouter.get('/bulk-jobs/:id', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
-  const job = getBulkJob(req.params.id);
+apiRouter.get('/bulk-jobs/:id', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
+  const job = await getBulkJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-
-  const user = getAdminUser(req);
-  if (!user || !userCanAccessProject(user, job.projectId)) {
+  if (!(await canAccessProject(req, job.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
-
   res.json({ ...job, stats: getJobStats(job) });
 });
 
 apiRouter.post('/bulk-jobs/:id/start', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
-  const job = getBulkJob(req.params.id);
+  const job = await getBulkJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-
-  const user = getAdminUser(req);
-  if (!user || !userCanAccessProject(user, job.projectId)) {
+  if (!(await canAccessProject(req, job.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
-    return;
   }
 
   const itemDataMap: Record<string, { sourceData: Record<string, unknown>; images?: Array<{ key: string; url: string }> }> =
@@ -390,77 +339,24 @@ apiRouter.post('/bulk-jobs/:id/start', requireAdmin, blockSiteKey, async (req: R
   res.json({ message: 'Job started', jobId: req.params.id });
 });
 
-apiRouter.post('/bulk-jobs/:id/retry', requireAdmin, blockSiteKey, (req: Request, res: Response) => {
-  const job = getBulkJob(req.params.id);
+apiRouter.post('/bulk-jobs/:id/retry', requireAdmin, blockSiteKey, async (req: Request, res: Response) => {
+  const job = await getBulkJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-
-  const user = getAdminUser(req);
-  if (!user || !userCanAccessProject(user, job.projectId)) {
+  if (!(await canAccessProject(req, job.projectId))) {
     return res.status(403).json({ error: 'Access denied' });
   }
-
-  const retried = retryFailedItems(req.params.id);
+  const retried = await retryFailedItems(req.params.id);
   if (!retried) return res.status(404).json({ error: 'Job not found' });
   res.json(retried);
 });
 
-apiRouter.get('/projects/:projectId/bulk-jobs', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), (req: Request, res: Response) => {
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM bulk_jobs WHERE project_id = ? ORDER BY created_at DESC').all(req.params.projectId);
+apiRouter.get('/projects/:projectId/bulk-jobs', requireAdmin, blockSiteKey, requireProjectAccess('projectId'), async (req: Request, res: Response) => {
+  const rows = await prisma.bulkJob.findMany({
+    where: { projectId: req.params.projectId },
+    orderBy: { createdAt: 'desc' },
+  });
   res.json(rows.map((row) => {
-    const r = row as Record<string, unknown>;
-    const items = JSON.parse(String(r.items));
-    const job = {
-      id: r.id, projectId: r.project_id, promptId: r.prompt_id, name: r.name,
-      status: r.status, applyMode: r.apply_mode, items,
-      createdAt: r.created_at, updatedAt: r.updated_at, completedAt: r.completed_at,
-    };
-    return { ...job, stats: getJobStats(job as Parameters<typeof getJobStats>[0]) };
+    const job = formatBulkJobRow(row);
+    return { ...job, stats: getJobStats(job) };
   }));
 });
-
-// ─── Helpers ────────────────────────────────────────────────
-
-function canAccessPrompt(req: Request, projectId: string): boolean {
-  if (req.auth?.type === 'site') {
-    return req.auth.projectId === projectId;
-  }
-  if (req.auth?.type === 'admin') {
-    const user = getAdminUser(req);
-    return !!user && userCanAccessProject(user, projectId);
-  }
-  return false;
-}
-
-function formatProject(row: unknown) {
-  const r = row as Record<string, unknown>;
-  return {
-    id: r.id, name: r.name, description: r.description,
-    websiteId: r.website_id,
-    wordpressUrl: r.wordpress_url, wordpressApiKey: r.wordpress_api_key ? '***' : null,
-    hasOpenaiKey: !!r.openai_api_key,
-    hasGeminiKey: !!r.gemini_api_key,
-    defaultModel: r.default_model, defaultLanguage: r.default_language,
-    createdAt: r.created_at, updatedAt: r.updated_at,
-  };
-}
-
-function formatPrompt(row: unknown) {
-  const r = row as Record<string, unknown>;
-  return {
-    id: r.id, projectId: r.project_id, name: r.name, description: r.description,
-    systemPrompt: r.system_prompt, userPromptTemplate: r.user_prompt_template,
-    outputFields: JSON.parse(String(r.output_fields)), model: r.model,
-    supportsVision: r.supports_vision === 1, responseFormat: r.response_format,
-    variables: JSON.parse(String(r.variables)), createdAt: r.created_at, updatedAt: r.updated_at,
-  };
-}
-
-function formatMapping(row: unknown) {
-  const r = row as Record<string, unknown>;
-  return {
-    id: r.id, projectId: r.project_id, promptId: r.prompt_id,
-    aiOutputKey: r.ai_output_key, targetType: r.target_type, targetField: r.target_field,
-    targetSelector: r.target_selector, contentType: r.content_type, termTaxonomy: r.term_taxonomy,
-  };
-}

@@ -11,7 +11,7 @@ import { authenticate, requireAdmin } from '../middleware/auth';
 export const authRouter = Router();
 
 authRouter.post('/bootstrap', async (req: Request, res: Response) => {
-  if (getUserCount() > 0) {
+  if ((await getUserCount()) > 0) {
     res.status(403).json({ error: 'Bootstrap is only available when no users exist' });
     return;
   }
@@ -29,10 +29,8 @@ authRouter.post('/bootstrap', async (req: Request, res: Response) => {
   try {
     const user = await createUser(String(email), String(password), String(name), true);
     const token = signToken({ sub: user.id });
-    res.status(201).json({
-      token,
-      user: loadAuthUser(user.id),
-    });
+    const authUser = await loadAuthUser(user.id);
+    res.status(201).json({ token, user: authUser });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Bootstrap failed' });
   }
@@ -55,8 +53,8 @@ authRouter.post('/login', async (req: Request, res: Response) => {
   res.json({ token, user });
 });
 
-authRouter.get('/me', authenticate, requireAdmin, (req: Request, res: Response) => {
-  const user = loadAuthUser(req.auth!.userId!);
+authRouter.get('/me', authenticate, requireAdmin, async (req: Request, res: Response) => {
+  const user = await loadAuthUser(req.auth!.userId!);
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
@@ -71,9 +69,10 @@ authRouter.get('/me', authenticate, requireAdmin, (req: Request, res: Response) 
   });
 });
 
-authRouter.get('/status', (_req: Request, res: Response) => {
+authRouter.get('/status', async (_req: Request, res: Response) => {
+  const userCount = await getUserCount();
   res.json({
-    needsBootstrap: getUserCount() === 0,
-    userCount: getUserCount(),
+    needsBootstrap: userCount === 0,
+    userCount,
   });
 });

@@ -5,7 +5,7 @@ import { getUserCount, createUser } from './auth';
  * Set ADMIN_EMAIL, ADMIN_PASSWORD, and ADMIN_NAME before first run.
  */
 export async function ensureBootstrapAdmin(): Promise<void> {
-  if (getUserCount() > 0) return;
+  if ((await getUserCount()) > 0) return;
 
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;

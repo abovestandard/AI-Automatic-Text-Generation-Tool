@@ -41,7 +41,7 @@ Select Content → Select Prompt → Generate → Review → Auto-Fill Fields �
 | Package | Description |
 |---------|-------------|
 | `packages/core` | Shared types, prompt engine, field mapper |
-| `packages/api` | REST API server with SQLite storage |
+| `packages/api` | REST API server with PostgreSQL (Prisma) |
 | `packages/admin` | React admin dashboard |
 | `packages/wordpress-plugin` | WordPress plugin for field integration |
 

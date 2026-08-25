@@ -1,34 +1,39 @@
-import { getDb } from './db';
+import './load-env';
+import { prisma } from './db';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Seeds the database with an example project, prompt, and field mappings
- * for a WordPress + ACF category content generation use case.
+ * Seeds the database with an example website, project, prompt, and field mappings.
  */
-export function seedDatabase(): void {
-  const db = getDb();
-  const existing = db.prepare('SELECT COUNT(*) as count FROM projects').get() as { count: number };
-  if (existing.count > 0) {
+export async function seedDatabase(): Promise<void> {
+  const existing = await prisma.project.count();
+  if (existing > 0) {
     console.log('Database already seeded, skipping.');
     return;
   }
 
-  const projectId = uuidv4();
-  const promptId = uuidv4();
-  const now = new Date().toISOString();
+  const website = await prisma.website.create({
+    data: {
+      name: 'Example WordPress Site',
+      slug: 'example-site',
+      domain: 'https://example.com',
+    },
+  });
 
-  db.prepare(`
-    INSERT INTO projects (id, name, description, default_model, default_language, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    projectId,
-    'Example WordPress Site',
-    'Example project for generating category content with ACF fields',
-    'gpt-4o',
-    'en',
-    now,
-    now
-  );
+  const project = await prisma.project.create({
+    data: {
+      name: 'Example WordPress Site',
+      description: 'Example project for generating category content with ACF fields',
+      defaultModel: 'gpt-4o',
+      defaultLanguage: 'en',
+      websiteId: website.id,
+    },
+  });
+
+  await prisma.website.update({
+    where: { id: website.id },
+    data: { defaultProjectId: project.id },
+  });
 
   const outputFields = [
     { key: 'seo_title', label: 'SEO Title', type: 'text', description: 'SEO-optimized page title, max 60 chars' },
@@ -52,23 +57,19 @@ Language: {{language}}
 Analyze the category image (if provided) to understand the products and create relevant content.
 Generate SEO-optimized content that helps customers understand this category.`;
 
-  db.prepare(`
-    INSERT INTO prompts (id, project_id, name, description, system_prompt, user_prompt_template, output_fields, supports_vision, response_format, variables, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    promptId,
-    projectId,
-    'Category Content Generator',
-    'Generates SEO title, descriptions, and FAQ for product categories',
-    systemPrompt,
-    userPromptTemplate,
-    JSON.stringify(outputFields),
-    1,
-    'json',
-    JSON.stringify(['category_name', 'existing_description', 'language']),
-    now,
-    now
-  );
+  const prompt = await prisma.prompt.create({
+    data: {
+      projectId: project.id,
+      name: 'Category Content Generator',
+      description: 'Generates SEO title, descriptions, and FAQ for product categories',
+      systemPrompt,
+      userPromptTemplate,
+      outputFields,
+      supportsVision: true,
+      responseFormat: 'json',
+      variables: ['category_name', 'existing_description', 'language'],
+    },
+  });
 
   const mappings = [
     { aiOutputKey: 'seo_title', targetType: 'acf', targetField: 'seo_title' },
@@ -81,20 +82,26 @@ Generate SEO-optimized content that helps customers understand this category.`;
     { aiOutputKey: 'category_description', targetType: 'term_field', targetField: 'description' },
   ];
 
-  const insertMapping = db.prepare(`
-    INSERT INTO field_mappings (id, project_id, prompt_id, ai_output_key, target_type, target_field)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
   for (const m of mappings) {
-    insertMapping.run(uuidv4(), projectId, promptId, m.aiOutputKey, m.targetType, m.targetField);
+    await prisma.fieldMapping.create({
+      data: {
+        projectId: project.id,
+        promptId: prompt.id,
+        aiOutputKey: m.aiOutputKey,
+        targetType: m.targetType,
+        targetField: m.targetField,
+      },
+    });
   }
 
   console.log('Database seeded successfully!');
-  console.log(`  Project ID: ${projectId}`);
-  console.log(`  Prompt ID:  ${promptId}`);
+  console.log(`  Website ID: ${website.id}`);
+  console.log(`  Project ID: ${project.id}`);
+  console.log(`  Prompt ID:  ${prompt.id}`);
 }
 
 if (require.main === module) {
-  seedDatabase();
+  seedDatabase()
+    .catch(console.error)
+    .finally(() => prisma.$disconnect());
 }

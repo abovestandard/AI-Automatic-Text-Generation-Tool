@@ -1,21 +1,18 @@
 import type { BulkJob, BulkJobItem, JobItemStatus } from '@ai-content/core';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb } from '../db';
+import { prisma } from '../db';
+import { formatBulkJobRow } from '../lib/formatters';
 import { generateContent } from './generation';
 
 const activeJobs = new Map<string, boolean>();
 
-export function createBulkJob(
+export async function createBulkJob(
   projectId: string,
   promptId: string,
   name: string,
   items: Omit<BulkJobItem, 'id' | 'status' | 'retryCount'>[],
   applyMode: BulkJob['applyMode'] = 'preview'
-): BulkJob {
-  const db = getDb();
-  const id = uuidv4();
-  const now = new Date().toISOString();
-
+): Promise<BulkJob> {
   const jobItems: BulkJobItem[] = items.map((item) => ({
     ...item,
     id: uuidv4(),
@@ -23,24 +20,18 @@ export function createBulkJob(
     retryCount: 0,
   }));
 
-  const job: BulkJob = {
-    id,
-    projectId,
-    promptId,
-    name,
-    status: 'queued',
-    applyMode,
-    items: jobItems,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const row = await prisma.bulkJob.create({
+    data: {
+      projectId,
+      promptId,
+      name,
+      status: 'queued',
+      applyMode,
+      items: jobItems as object,
+    },
+  });
 
-  db.prepare(`
-    INSERT INTO bulk_jobs (id, project_id, prompt_id, name, status, apply_mode, items, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, projectId, promptId, name, 'queued', applyMode, JSON.stringify(jobItems), now, now);
-
-  return job;
+  return formatBulkJobRow(row);
 }
 
 export async function processBulkJob(
@@ -50,50 +41,40 @@ export async function processBulkJob(
     images?: Array<{ key: string; url: string; base64?: string; mimeType?: string }>;
   }>
 ): Promise<BulkJob> {
-  const db = getDb();
   if (activeJobs.get(jobId)) {
     throw new Error('Job is already running');
   }
   activeJobs.set(jobId, true);
 
-  const row = db.prepare('SELECT * FROM bulk_jobs WHERE id = ?').get(jobId) as {
-    id: string;
-    project_id: string;
-    prompt_id: string;
-    name: string;
-    status: string;
-    apply_mode: string;
-    items: string;
-    created_at: string;
-    updated_at: string;
-  };
-
+  const row = await prisma.bulkJob.findUnique({ where: { id: jobId } });
   if (!row) throw new Error('Job not found');
 
-  let items: BulkJobItem[] = JSON.parse(row.items);
-  const now = new Date().toISOString();
+  let items: BulkJobItem[] = row.items as unknown as BulkJobItem[];
 
-  db.prepare('UPDATE bulk_jobs SET status = ?, updated_at = ? WHERE id = ?').run('running', now, jobId);
+  await prisma.bulkJob.update({
+    where: { id: jobId },
+    data: { status: 'running' },
+  });
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (item.status === 'completed') continue;
 
     items[i] = { ...item, status: 'processing' };
-    updateJobItems(jobId, items, 'running');
+    await updateJobItems(jobId, items, 'running');
 
     try {
       const { sourceData, images } = await getItemData(item);
       const result = await generateContent({
-        projectId: row.project_id,
-        promptId: row.prompt_id,
+        projectId: row.projectId,
+        promptId: row.promptId,
         itemId: item.itemId,
         itemType: item.itemType,
         taxonomy: item.taxonomy,
         postType: item.postType,
         sourceData,
         images,
-        applyMode: row.apply_mode as BulkJob['applyMode'],
+        applyMode: row.applyMode as BulkJob['applyMode'],
       });
 
       if (result.status === 'success') {
@@ -117,54 +98,32 @@ export async function processBulkJob(
       };
     }
 
-    updateJobItems(jobId, items, 'running');
+    await updateJobItems(jobId, items, 'running');
   }
 
-  const hasFailed = items.some((i) => i.status === 'failed');
-  const finalStatus = hasFailed ? 'completed' : 'completed';
-  const completedAt = new Date().toISOString();
-
-  db.prepare('UPDATE bulk_jobs SET status = ?, items = ?, updated_at = ?, completed_at = ? WHERE id = ?')
-    .run(finalStatus, JSON.stringify(items), completedAt, completedAt, jobId);
+  const completedAt = new Date();
+  await prisma.bulkJob.update({
+    where: { id: jobId },
+    data: {
+      status: 'completed',
+      items: items as object,
+      completedAt,
+    },
+  });
 
   activeJobs.delete(jobId);
 
-  return getBulkJob(jobId)!;
+  return (await getBulkJob(jobId))!;
 }
 
-export function getBulkJob(jobId: string): BulkJob | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM bulk_jobs WHERE id = ?').get(jobId) as {
-    id: string;
-    project_id: string;
-    prompt_id: string;
-    name: string;
-    status: string;
-    apply_mode: string;
-    items: string;
-    created_at: string;
-    updated_at: string;
-    completed_at: string | null;
-  } | undefined;
-
+export async function getBulkJob(jobId: string): Promise<BulkJob | null> {
+  const row = await prisma.bulkJob.findUnique({ where: { id: jobId } });
   if (!row) return null;
-
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    promptId: row.prompt_id,
-    name: row.name,
-    status: row.status as BulkJob['status'],
-    applyMode: row.apply_mode as BulkJob['applyMode'],
-    items: JSON.parse(row.items),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    completedAt: row.completed_at ?? undefined,
-  };
+  return formatBulkJobRow(row);
 }
 
-export function retryFailedItems(jobId: string): BulkJob | null {
-  const job = getBulkJob(jobId);
+export async function retryFailedItems(jobId: string): Promise<BulkJob | null> {
+  const job = await getBulkJob(jobId);
   if (!job) return null;
 
   const items: BulkJobItem[] = job.items.map((item: BulkJobItem) =>
@@ -173,14 +132,18 @@ export function retryFailedItems(jobId: string): BulkJob | null {
       : item
   );
 
-  updateJobItems(jobId, items, 'queued');
+  await updateJobItems(jobId, items, 'queued');
   return getBulkJob(jobId);
 }
 
-function updateJobItems(jobId: string, items: BulkJobItem[], status: string): void {
-  const db = getDb();
-  db.prepare('UPDATE bulk_jobs SET items = ?, status = ?, updated_at = ? WHERE id = ?')
-    .run(JSON.stringify(items), status, new Date().toISOString(), jobId);
+async function updateJobItems(jobId: string, items: BulkJobItem[], status: string): Promise<void> {
+  await prisma.bulkJob.update({
+    where: { id: jobId },
+    data: {
+      items: items as object,
+      status,
+    },
+  });
 }
 
 export function getJobStats(job: BulkJob) {
