@@ -636,6 +636,15 @@
   color: var(--aica-primary);
 }
 
+.aica-bulk-badge.failed {
+  background: #fce8e8;
+  color: #b32d2e;
+}
+
+.aica-bulk-preview-item.is-failed {
+  border-color: #f1aeb5;
+}
+
 .aica-bulk-failed-list {
   margin: 12px 0 16px;
   padding: 12px 16px;

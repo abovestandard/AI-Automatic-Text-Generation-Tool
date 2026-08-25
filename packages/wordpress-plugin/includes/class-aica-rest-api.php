@@ -346,8 +346,15 @@ class AICA_REST_API {
             return new WP_REST_Response(['error' => 'Bulk job not found.'], 404);
         }
 
+        AICA_Bulk_Processor::normalize_job_state($job_id);
+        $job = AICA_Bulk_Processor::get_job($job_id);
+
+        if (!$job) {
+            return new WP_REST_Response(['error' => 'Bulk job not found.'], 404);
+        }
+
         if (in_array($job['status'], ['queued', 'running'], true)) {
-            $job = AICA_Bulk_Processor::process_next($job_id);
+            $job = AICA_Bulk_Processor::process_pending_items($job_id);
         }
 
         if (!$job) {

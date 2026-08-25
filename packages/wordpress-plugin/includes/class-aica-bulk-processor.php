@@ -86,9 +86,75 @@ class AICA_Bulk_Processor {
     }
 
     /**
+     * Process as many pending items as possible within a time budget.
+     */
+    public static function process_pending_items(string $job_id, int $time_limit_seconds = 25): ?array {
+        $lock_key = self::lock_key($job_id);
+        if (get_transient($lock_key)) {
+            return self::get_job($job_id);
+        }
+
+        set_transient($lock_key, 1, max(90, $time_limit_seconds + 60));
+
+        try {
+            self::normalize_job_state($job_id);
+
+            $deadline = time() + max(5, $time_limit_seconds);
+            $job = self::get_job($job_id);
+
+            while ($job && time() < $deadline) {
+                if (in_array($job['status'], ['completed', 'failed'], true)) {
+                    break;
+                }
+
+                $job = self::process_next_unlocked($job_id);
+                if (!$job) {
+                    break;
+                }
+
+                if (in_array($job['status'], ['completed', 'failed'], true)) {
+                    break;
+                }
+
+                $has_pending = false;
+                foreach ($job['items'] as $item) {
+                    if (($item['status'] ?? '') === 'pending') {
+                        $has_pending = true;
+                        break;
+                    }
+                }
+
+                if (!$has_pending) {
+                    break;
+                }
+            }
+
+            return $job ?? self::get_job($job_id);
+        } finally {
+            delete_transient($lock_key);
+        }
+    }
+
+    /**
      * Process the next pending item in a bulk job (one item per request).
      */
     public static function process_next(string $job_id): ?array {
+        $lock_key = self::lock_key($job_id);
+        if (get_transient($lock_key)) {
+            return self::get_job($job_id);
+        }
+
+        set_transient($lock_key, 1, 120);
+
+        try {
+            self::normalize_job_state($job_id);
+            return self::process_next_unlocked($job_id);
+        } finally {
+            delete_transient($lock_key);
+        }
+    }
+
+    private static function process_next_unlocked(string $job_id): ?array {
         $job = self::get_job($job_id);
         if (!$job || in_array($job['status'], ['completed', 'failed'], true)) {
             return $job;
@@ -106,8 +172,7 @@ class AICA_Bulk_Processor {
         }
 
         if ($next_index === null) {
-            $job['status']      = 'completed';
-            $job['completedAt'] = current_time('c');
+            $job = self::sync_job_status($job);
             self::save_job($job);
             return $job;
         }
@@ -140,28 +205,79 @@ class AICA_Bulk_Processor {
             $job['items'][$next_index]['error']  = $e->getMessage();
         }
 
-        $has_pending = false;
-        $has_failed  = false;
-        foreach ($job['items'] as $item) {
-            if (($item['status'] ?? '') === 'pending') {
-                $has_pending = true;
-            }
-            if (($item['status'] ?? '') === 'failed') {
-                $has_failed = true;
-            }
-        }
-
-        if ($has_pending) {
-            $job['status'] = 'running';
-        } else {
-            $job['status']      = 'completed';
-            $job['completedAt'] = current_time('c');
-        }
-
-        $job['updatedAt'] = current_time('c');
+        $job = self::sync_job_status($job);
         self::save_job($job);
 
         return $job;
+    }
+
+    /**
+     * Resume jobs that were incorrectly marked completed while items were still pending/processing.
+     */
+    public static function normalize_job_state(string $job_id): void {
+        $job = self::get_job($job_id);
+        if (!$job) {
+            return;
+        }
+
+        $changed = false;
+        $terminal_count = 0;
+
+        foreach ($job['items'] as $index => $item) {
+            $status = $item['status'] ?? 'pending';
+            if (in_array($status, ['completed', 'failed'], true)) {
+                $terminal_count++;
+                continue;
+            }
+
+            if ($status === 'processing' && ($job['status'] ?? '') === 'completed') {
+                $job['items'][$index]['status'] = 'pending';
+                $changed = true;
+            }
+        }
+
+        if (($job['status'] ?? '') === 'completed' && $terminal_count < count($job['items'])) {
+            $job['status'] = 'running';
+            $job['completedAt'] = null;
+            $changed = true;
+        }
+
+        if ($changed) {
+            $job['updatedAt'] = current_time('c');
+            self::save_job($job);
+        }
+    }
+
+    private static function sync_job_status(array $job): array {
+        $has_pending = false;
+        $has_processing = false;
+
+        foreach ($job['items'] as $item) {
+            $status = $item['status'] ?? 'pending';
+            if ($status === 'pending') {
+                $has_pending = true;
+            }
+            if ($status === 'processing') {
+                $has_processing = true;
+            }
+        }
+
+        if ($has_pending || $has_processing) {
+            $job['status'] = 'running';
+            $job['completedAt'] = null;
+        } else {
+            $job['status'] = 'completed';
+            if (empty($job['completedAt'])) {
+                $job['completedAt'] = current_time('c');
+            }
+        }
+
+        $job['updatedAt'] = current_time('c');
+        return $job;
+    }
+
+    private static function lock_key(string $job_id): string {
+        return 'aica_bulk_lock_' . $job_id;
     }
 
     public static function apply_item(string $job_id, string $item_uuid, array $mapped_fields, string $save_mode = 'replace'): array {

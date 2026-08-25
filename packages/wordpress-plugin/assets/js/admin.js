@@ -704,6 +704,8 @@
     let bulkJobId = null;
     let bulkJobData = null;
     let pollInterval = null;
+    let pollInFlight = false;
+    let pollErrorCount = 0;
 
     function initBulkPage() {
         const $page = $('.aica-bulk-page');
@@ -861,6 +863,12 @@
         $('#aica-stat-completed, #aica-stat-processing, #aica-stat-pending, #aica-stat-failed, #aica-stat-saved').text('0');
         $('.aica-progress-fill').css('width', '0%');
         bulkJobData = null;
+        pollErrorCount = 0;
+        pollInFlight = false;
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
 
         wp.apiFetch({
             path: '/ai-content/v1/bulk/generate',
@@ -887,10 +895,20 @@
         });
     }
 
+    function isBulkJobFinished(job) {
+        const stats = job.stats || {};
+        return job.status === 'completed'
+            && (stats.pending || 0) === 0
+            && (stats.processing || 0) === 0;
+    }
+
     function pollBulkStatus() {
-        if (!bulkJobId) return;
+        if (!bulkJobId || pollInFlight) return;
+        pollInFlight = true;
+
         wp.apiFetch({ path: `/ai-content/v1/bulk/status/${bulkJobId}` })
             .then(function (job) {
+                pollErrorCount = 0;
                 bulkJobData = job;
                 const stats = job.stats || {};
                 $('#aica-stat-completed').text(stats.completed || 0);
@@ -900,12 +918,15 @@
                 $('#aica-stat-saved').text(stats.saved || 0);
 
                 const total = stats.total || 1;
-                const progress = ((stats.completed || 0) / total) * 100;
+                const done = (stats.completed || 0) + (stats.failed || 0);
+                const progress = Math.min(100, (done / total) * 100);
                 $('.aica-progress-fill').css('width', progress + '%');
 
-                if (job.status === 'completed') {
-                    clearInterval(pollInterval);
-                    pollInterval = null;
+                if (isBulkJobFinished(job)) {
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                        pollInterval = null;
+                    }
                     $('#aica-bulk-start').prop('disabled', false);
 
                     const applyMode = job.applyMode || $('#aica-bulk-apply-mode').val();
@@ -927,13 +948,25 @@
                     }
 
                     $('#aica-bulk-status-message').text(message).show();
+                } else if ((stats.pending || 0) > 0 || (stats.processing || 0) > 0 || job.status === 'running' || job.status === 'queued') {
+                    $('#aica-bulk-status-message').text(
+                        `Processing bulk generation: ${stats.completed || 0} of ${stats.total || 0} completed, ${stats.pending || 0} pending...`
+                    ).show();
                 }
             })
             .catch(function (err) {
-                clearInterval(pollInterval);
-                pollInterval = null;
-                $('#aica-bulk-start').prop('disabled', false);
-                alert('Bulk status check failed: ' + extractApiError(err));
+                pollErrorCount += 1;
+                if (pollErrorCount >= 5) {
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                        pollInterval = null;
+                    }
+                    $('#aica-bulk-start').prop('disabled', false);
+                    alert('Bulk status check failed: ' + extractApiError(err));
+                }
+            })
+            .finally(function () {
+                pollInFlight = false;
             });
     }
 
@@ -964,7 +997,7 @@
         $list.empty();
 
         const items = (job.items || []).filter(function (item) {
-            return item.status === 'completed' && (item.mappedFields || []).length > 0;
+            return item.status === 'completed' || item.status === 'failed';
         });
 
         if (!items.length) {
@@ -974,16 +1007,27 @@
         }
 
         items.forEach(function (item) {
-            const badge = item.applied
-                ? '<span class="aica-bulk-badge applied">Applied</span>'
-                : '<span class="aica-bulk-badge ready">Ready to apply</span>';
+            const hasMappedFields = (item.mappedFields || []).length > 0;
+            const badge = item.status === 'failed'
+                ? '<span class="aica-bulk-badge failed">Failed</span>'
+                : item.applied
+                    ? '<span class="aica-bulk-badge applied">Applied</span>'
+                    : hasMappedFields
+                        ? '<span class="aica-bulk-badge ready">Ready to apply</span>'
+                        : '<span class="aica-bulk-badge ready">No mapped fields</span>';
 
             const editLink = item.editUrl
                 ? `<a href="${escapeHtml(item.editUrl)}" class="button button-small" target="_blank" rel="noopener">Edit in WordPress</a>`
                 : '';
 
+            const previewBody = item.status === 'failed'
+                ? `<p class="aica-field-hint">${escapeHtml(item.error || 'Generation failed for this item.')}</p>`
+                : hasMappedFields
+                    ? renderBulkPreviewFields(item)
+                    : '<p class="aica-field-hint">Generation completed but no field mappings were returned. Check your prompt and field mappings.</p>';
+
             $list.append(
-                `<div class="aica-bulk-preview-item${item.applied ? ' is-applied' : ''}" data-item-id="${escapeHtml(item.id)}">
+                `<div class="aica-bulk-preview-item${item.applied ? ' is-applied' : ''}${item.status === 'failed' ? ' is-failed' : ''}" data-item-id="${escapeHtml(item.id)}">
                     <div class="aica-bulk-preview-item-header">
                         <div>
                             <h3>${escapeHtml(item.itemLabel || ('Item ' + item.itemId))}</h3>
@@ -991,14 +1035,14 @@
                         </div>
                         <div class="aica-bulk-preview-item-actions">
                             <button type="button" class="button button-small aica-bulk-toggle-preview">Preview</button>
-                            <button type="button" class="button button-primary button-small aica-bulk-apply-item"${item.applied ? ' disabled' : ''}>
+                            <button type="button" class="button button-primary button-small aica-bulk-apply-item"${item.applied || item.status === 'failed' || !hasMappedFields ? ' disabled' : ''}>
                                 ${item.applied ? 'Applied' : 'Apply to WordPress'}
                             </button>
                             ${editLink}
                         </div>
                     </div>
                     <div class="aica-bulk-preview-item-body">
-                        ${renderBulkPreviewFields(item)}
+                        ${previewBody}
                     </div>
                 </div>`
             );
