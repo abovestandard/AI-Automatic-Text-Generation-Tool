@@ -60,6 +60,8 @@ npm install
 
 ### 2. Configure Environment
 
+Create `.env` in the **project root** (same folder as `package.json`):
+
 ```bash
 cp .env.example .env
 ```
@@ -69,6 +71,8 @@ Edit `.env` and set your PostgreSQL connection:
 ```env
 DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@localhost:5432/ai_content?schema=public"
 ```
+
+> Prisma CLI reads this file from the project root automatically when you run `npm run db:migrate`.
 
 Create the database once in PostgreSQL:
 
