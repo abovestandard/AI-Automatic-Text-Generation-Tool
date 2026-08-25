@@ -34,8 +34,10 @@ export const api = {
   updateWebsite: (id: string, data: Partial<Website>) => request<Website>(`/websites/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteWebsite: (id: string) => request<void>(`/websites/${id}`, { method: 'DELETE' }),
   getWebsiteMembers: (id: string) => request<WebsiteMember[]>(`/websites/${id}/members`),
-  addWebsiteMember: (id: string, data: { email: string; name: string; password: string; role: string }) =>
+  addWebsiteMember: (id: string, data: { email?: string; name?: string; password?: string; role: string; userId?: string }) =>
     request<WebsiteMember>(`/websites/${id}/members`, { method: 'POST', body: JSON.stringify(data) }),
+  updateWebsiteMember: (websiteId: string, memberId: string, data: { role: string }) =>
+    request<WebsiteMember>(`/websites/${websiteId}/members/${memberId}`, { method: 'PUT', body: JSON.stringify(data) }),
   removeWebsiteMember: (websiteId: string, memberId: string) => request<void>(`/websites/${websiteId}/members/${memberId}`, { method: 'DELETE' }),
   getWebsiteApiKeys: (id: string) => request<SiteApiKey[]>(`/websites/${id}/api-keys`),
   createWebsiteApiKey: (id: string, label: string) => request<{ apiKey: string; id: string }>(`/websites/${id}/api-keys`, { method: 'POST', body: JSON.stringify({ label }) }),
@@ -44,6 +46,8 @@ export const api = {
   getUsers: () => request<AuthUser[]>('/users'),
   createUser: (data: { name: string; email: string; password: string; isSuperAdmin?: boolean }) =>
     request<AuthUser>('/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: string, data: { name?: string; email?: string; password?: string; isSuperAdmin?: boolean }) =>
+    request<AuthUser>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
 
   getProjects: () => request<Project[]>('/projects'),
@@ -75,6 +79,14 @@ export interface AuthUser {
   websiteIds: string[];
   rolesByWebsite: Record<string, string>;
   createdAt?: string;
+  memberships?: UserMembership[];
+}
+
+export interface UserMembership {
+  id: string;
+  websiteId: string;
+  websiteName: string;
+  role: string;
 }
 
 export interface Website {

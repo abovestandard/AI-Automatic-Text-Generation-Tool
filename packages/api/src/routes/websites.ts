@@ -155,11 +155,20 @@ websitesRouter.post('/:id/members', requireWebsiteManage('id'), async (req: Requ
 
   let targetUserId = userId as string | undefined;
 
-  if (!targetUserId) {
-    if (!email || !password || !name) {
-      res.status(400).json({ error: 'Email, name, and password are required for new users' });
+  if (targetUserId) {
+    const existingUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!existingUser) {
+      res.status(400).json({ error: 'User not found' });
       return;
     }
+    if (existingUser.isSuperAdmin) {
+      res.status(400).json({ error: 'Super admins already have access to all websites' });
+      return;
+    }
+  } else if (!email || !password || !name) {
+    res.status(400).json({ error: 'Select an existing user or provide email, name, and password for a new user' });
+    return;
+  } else {
     const existing = await prisma.user.findUnique({ where: { email: String(email).toLowerCase() } });
     if (existing) {
       targetUserId = existing.id;
@@ -167,6 +176,11 @@ websitesRouter.post('/:id/members', requireWebsiteManage('id'), async (req: Requ
       const created = await createUser(String(email), String(password), String(name), false);
       targetUserId = created.id;
     }
+  }
+
+  if (!targetUserId) {
+    res.status(400).json({ error: 'User is required' });
+    return;
   }
 
   try {
@@ -190,6 +204,40 @@ websitesRouter.post('/:id/members', requireWebsiteManage('id'), async (req: Requ
   } catch {
     res.status(400).json({ error: 'User is already a member of this website' });
   }
+});
+
+websitesRouter.put('/:id/members/:memberId', requireWebsiteManage('id'), async (req: Request, res: Response) => {
+  const { role } = req.body;
+  if (!['website_admin', 'editor', 'viewer'].includes(role)) {
+    res.status(400).json({ error: 'Invalid role' });
+    return;
+  }
+
+  const membership = await prisma.membership.findFirst({
+    where: { id: req.params.memberId, websiteId: req.params.id },
+    include: { user: true },
+  });
+
+  if (!membership) {
+    res.status(404).json({ error: 'Member not found' });
+    return;
+  }
+
+  const updated = await prisma.membership.update({
+    where: { id: membership.id },
+    data: { role },
+    include: { user: true },
+  });
+
+  res.json({
+    id: updated.id,
+    userId: updated.userId,
+    websiteId: updated.websiteId,
+    role: updated.role,
+    email: updated.user.email,
+    name: updated.user.name,
+    createdAt: updated.createdAt.toISOString(),
+  });
 });
 
 websitesRouter.delete('/:id/members/:memberId', requireWebsiteManage('id'), async (req: Request, res: Response) => {

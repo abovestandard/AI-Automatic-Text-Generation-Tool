@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
 import { api, AuthUser } from '../api';
 
+const emptyForm = { name: '', email: '', password: '', isSuperAdmin: false };
+
 export default function UsersPage() {
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', password: '', isSuperAdmin: false });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => { loadUsers(); }, []);
 
@@ -20,12 +24,46 @@ export default function UsersPage() {
     }
   }
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    await api.createUser(form);
+  function resetForm() {
+    setForm(emptyForm);
+    setEditingId(null);
     setShowForm(false);
-    setForm({ name: '', email: '', password: '', isSuperAdmin: false });
-    loadUsers();
+    setError('');
+  }
+
+  function startEdit(user: AuthUser) {
+    setEditingId(user.id);
+    setShowForm(true);
+    setForm({
+      name: user.name || '',
+      email: user.email,
+      password: '',
+      isSuperAdmin: user.isSuperAdmin,
+    });
+    setError('');
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+
+    try {
+      if (editingId) {
+        const payload: { name: string; email: string; isSuperAdmin: boolean; password?: string } = {
+          name: form.name,
+          email: form.email,
+          isSuperAdmin: form.isSuperAdmin,
+        };
+        if (form.password) payload.password = form.password;
+        await api.updateUser(editingId, payload);
+      } else {
+        await api.createUser(form);
+      }
+      resetForm();
+      loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save user');
+    }
   }
 
   async function handleDelete(id: string) {
@@ -41,15 +79,19 @@ export default function UsersPage() {
       <div className="page-header">
         <div>
           <h2>Platform Users</h2>
-          <p className="help-text">Manage CRM users. Super admins can access all websites. Other users need website memberships.</p>
+          <p className="help-text">
+            Manage CRM users. Super admins can access all websites. Other users must be assigned to websites under Website → Members.
+          </p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : 'Add User'}
+        <button className="btn btn-primary" onClick={() => { resetForm(); setShowForm(!showForm); }}>
+          {showForm && !editingId ? 'Cancel' : 'Add User'}
         </button>
       </div>
 
       {showForm && (
-        <form className="card form-card" onSubmit={handleCreate}>
+        <form className="card form-card" onSubmit={handleSubmit}>
+          <h3>{editingId ? 'Edit User' : 'Add User'}</h3>
+          {error && <div className="alert alert-error">{error}</div>}
           <div className="form-row">
             <div className="form-group">
               <label>Name</label>
@@ -62,8 +104,14 @@ export default function UsersPage() {
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label>Password</label>
-              <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required minLength={8} />
+              <label>{editingId ? 'New Password (leave blank to keep current)' : 'Password'}</label>
+              <input
+                type="password"
+                value={form.password}
+                onChange={e => setForm({ ...form, password: e.target.value })}
+                required={!editingId}
+                minLength={editingId ? undefined : 8}
+              />
             </div>
             <div className="form-group">
               <label className="checkbox-label">
@@ -72,13 +120,16 @@ export default function UsersPage() {
               </label>
             </div>
           </div>
-          <button type="submit" className="btn btn-primary">Create User</button>
+          <div className="form-actions">
+            <button type="submit" className="btn btn-primary">{editingId ? 'Save Changes' : 'Create User'}</button>
+            <button type="button" className="btn" onClick={resetForm}>Cancel</button>
+          </div>
         </form>
       )}
 
       <table className="data-table card" style={{ padding: 0, overflow: 'hidden' }}>
         <thead>
-          <tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th></th></tr>
+          <tr><th>Name</th><th>Email</th><th>Role</th><th>Websites</th><th>Created</th><th></th></tr>
         </thead>
         <tbody>
           {users.map(u => (
@@ -86,8 +137,24 @@ export default function UsersPage() {
               <td>{u.name}</td>
               <td>{u.email}</td>
               <td>{u.isSuperAdmin ? <span className="badge badge-primary">Super Admin</span> : <span className="badge">Member</span>}</td>
+              <td>
+                {u.isSuperAdmin ? (
+                  <span className="text-muted">All websites</span>
+                ) : u.memberships?.length ? (
+                  u.memberships.map((m) => (
+                    <span key={m.id} className="badge" style={{ marginRight: 6, marginBottom: 4 }}>
+                      {m.websiteName} ({m.role})
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-muted">Not assigned</span>
+                )}
+              </td>
               <td>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}</td>
-              <td>{!u.isSuperAdmin && <button className="btn btn-sm btn-danger" onClick={() => handleDelete(u.id)}>Delete</button>}</td>
+              <td className="table-actions">
+                <button className="btn btn-sm" onClick={() => startEdit(u)}>Edit</button>
+                {!u.isSuperAdmin && <button className="btn btn-sm btn-danger" onClick={() => handleDelete(u.id)}>Delete</button>}
+              </td>
             </tr>
           ))}
         </tbody>

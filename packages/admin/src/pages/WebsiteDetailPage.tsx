@@ -1,21 +1,33 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api, Website, WebsiteMember, SiteApiKey } from '../api';
+import { api, Website, WebsiteMember, SiteApiKey, AuthUser } from '../api';
 import { useAuth } from '../context/AuthContext';
+
+type MemberAddMode = 'existing' | 'new';
 
 export default function WebsiteDetailPage() {
   const { websiteId } = useParams<{ websiteId: string }>();
   const { user } = useAuth();
   const [website, setWebsite] = useState<Website | null>(null);
   const [members, setMembers] = useState<WebsiteMember[]>([]);
+  const [platformUsers, setPlatformUsers] = useState<AuthUser[]>([]);
   const [apiKeys, setApiKeys] = useState<SiteApiKey[]>([]);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [showMemberForm, setShowMemberForm] = useState(false);
-  const [memberForm, setMemberForm] = useState({ email: '', name: '', password: '', role: 'website_admin' });
+  const [memberAddMode, setMemberAddMode] = useState<MemberAddMode>('existing');
+  const [memberForm, setMemberForm] = useState({ userId: '', email: '', name: '', password: '', role: 'website_admin' });
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editingRole, setEditingRole] = useState('website_admin');
+  const [memberError, setMemberError] = useState('');
   const [form, setForm] = useState({ name: '', domain: '' });
   const [saved, setSaved] = useState(false);
 
   const canManage = user?.isSuperAdmin || (websiteId && user?.rolesByWebsite?.[websiteId] === 'website_admin');
+
+  const availableUsers = useMemo(() => {
+    const memberUserIds = new Set(members.map((m) => m.userId));
+    return platformUsers.filter((u) => !u.isSuperAdmin && !memberUserIds.has(u.id));
+  }, [platformUsers, members]);
 
   useEffect(() => {
     if (websiteId) loadData();
@@ -23,15 +35,17 @@ export default function WebsiteDetailPage() {
 
   async function loadData() {
     if (!websiteId) return;
-    const [w, m, k] = await Promise.all([
+    const [w, m, k, users] = await Promise.all([
       api.getWebsite(websiteId),
       api.getWebsiteMembers(websiteId).catch(() => []),
       api.getWebsiteApiKeys(websiteId).catch(() => []),
+      user?.isSuperAdmin ? api.getUsers().catch(() => []) : Promise.resolve([]),
     ]);
     setWebsite(w);
     setForm({ name: w.name, domain: w.domain || '' });
     setMembers(m);
     setApiKeys(k);
+    setPlatformUsers(users);
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -56,13 +70,52 @@ export default function WebsiteDetailPage() {
     loadData();
   }
 
+  function resetMemberForm() {
+    setMemberForm({ userId: '', email: '', name: '', password: '', role: 'website_admin' });
+    setMemberAddMode('existing');
+    setMemberError('');
+    setShowMemberForm(false);
+  }
+
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
     if (!websiteId) return;
-    await api.addWebsiteMember(websiteId, memberForm);
-    setShowMemberForm(false);
-    setMemberForm({ email: '', name: '', password: '', role: 'website_admin' });
-    loadData();
+    setMemberError('');
+
+    try {
+      if (memberAddMode === 'existing') {
+        if (!memberForm.userId) {
+          setMemberError('Select a platform user to add.');
+          return;
+        }
+        await api.addWebsiteMember(websiteId, {
+          userId: memberForm.userId,
+          role: memberForm.role,
+        });
+      } else {
+        await api.addWebsiteMember(websiteId, {
+          email: memberForm.email,
+          name: memberForm.name,
+          password: memberForm.password,
+          role: memberForm.role,
+        });
+      }
+      resetMemberForm();
+      loadData();
+    } catch (err) {
+      setMemberError(err instanceof Error ? err.message : 'Failed to add member');
+    }
+  }
+
+  async function handleUpdateMemberRole(memberId: string) {
+    if (!websiteId) return;
+    try {
+      await api.updateWebsiteMember(websiteId, memberId, { role: editingRole });
+      setEditingMemberId(null);
+      loadData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update member');
+    }
   }
 
   async function handleRemoveMember(memberId: string) {
@@ -149,7 +202,9 @@ export default function WebsiteDetailPage() {
           <div className="card form-card" style={{ marginTop: 24 }}>
             <div className="section-header">
               <h3>Website Members</h3>
-              <p className="help-text">Control who can access this website in the CRM. Website admins can manage prompts and settings for their site only.</p>
+              <p className="help-text">
+                Assign platform users to this website. Users created in the Users tab must be added here before they can access this site in the CRM.
+              </p>
             </div>
 
             <button type="button" className="btn btn-sm" onClick={() => setShowMemberForm(!showMemberForm)}>
@@ -158,30 +213,74 @@ export default function WebsiteDetailPage() {
 
             {showMemberForm && (
               <form onSubmit={handleAddMember} style={{ marginTop: 16 }}>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Name</label>
-                    <input value={memberForm.name} onChange={e => setMemberForm({ ...memberForm, name: e.target.value })} required />
-                  </div>
-                  <div className="form-group">
-                    <label>Email</label>
-                    <input type="email" value={memberForm.email} onChange={e => setMemberForm({ ...memberForm, email: e.target.value })} required />
-                  </div>
+                {memberError && <div className="alert alert-error">{memberError}</div>}
+
+                <div className="form-group">
+                  <label>Add member by</label>
+                  <select value={memberAddMode} onChange={e => setMemberAddMode(e.target.value as MemberAddMode)}>
+                    <option value="existing">Select existing platform user</option>
+                    <option value="new">Create new user</option>
+                  </select>
                 </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Password</label>
-                    <input type="password" value={memberForm.password} onChange={e => setMemberForm({ ...memberForm, password: e.target.value })} required minLength={8} />
+
+                {memberAddMode === 'existing' ? (
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Platform User</label>
+                      <select
+                        value={memberForm.userId}
+                        onChange={e => setMemberForm({ ...memberForm, userId: e.target.value })}
+                        required
+                      >
+                        <option value="">Select user...</option>
+                        {availableUsers.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name || u.email} ({u.email})
+                          </option>
+                        ))}
+                      </select>
+                      {availableUsers.length === 0 && (
+                        <p className="help-text">No unassigned users available. Create users in the Users tab first.</p>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label>Role</label>
+                      <select value={memberForm.role} onChange={e => setMemberForm({ ...memberForm, role: e.target.value })}>
+                        <option value="website_admin">Website Admin</option>
+                        <option value="editor">Editor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    </div>
                   </div>
-                  <div className="form-group">
-                    <label>Role</label>
-                    <select value={memberForm.role} onChange={e => setMemberForm({ ...memberForm, role: e.target.value })}>
-                      <option value="website_admin">Website Admin</option>
-                      <option value="editor">Editor</option>
-                      <option value="viewer">Viewer</option>
-                    </select>
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Name</label>
+                        <input value={memberForm.name} onChange={e => setMemberForm({ ...memberForm, name: e.target.value })} required />
+                      </div>
+                      <div className="form-group">
+                        <label>Email</label>
+                        <input type="email" value={memberForm.email} onChange={e => setMemberForm({ ...memberForm, email: e.target.value })} required />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Password</label>
+                        <input type="password" value={memberForm.password} onChange={e => setMemberForm({ ...memberForm, password: e.target.value })} required minLength={8} />
+                      </div>
+                      <div className="form-group">
+                        <label>Role</label>
+                        <select value={memberForm.role} onChange={e => setMemberForm({ ...memberForm, role: e.target.value })}>
+                          <option value="website_admin">Website Admin</option>
+                          <option value="editor">Editor</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 <button type="submit" className="btn btn-primary">Add Member</button>
               </form>
             )}
@@ -196,8 +295,30 @@ export default function WebsiteDetailPage() {
                     <tr key={m.id}>
                       <td>{m.name}</td>
                       <td>{m.email}</td>
-                      <td><span className="badge">{m.role}</span></td>
-                      <td><button className="btn btn-sm btn-danger" onClick={() => handleRemoveMember(m.id)}>Remove</button></td>
+                      <td>
+                        {editingMemberId === m.id ? (
+                          <select value={editingRole} onChange={e => setEditingRole(e.target.value)}>
+                            <option value="website_admin">Website Admin</option>
+                            <option value="editor">Editor</option>
+                            <option value="viewer">Viewer</option>
+                          </select>
+                        ) : (
+                          <span className="badge">{m.role}</span>
+                        )}
+                      </td>
+                      <td className="table-actions">
+                        {editingMemberId === m.id ? (
+                          <>
+                            <button className="btn btn-sm btn-primary" onClick={() => handleUpdateMemberRole(m.id)}>Save</button>
+                            <button className="btn btn-sm" onClick={() => setEditingMemberId(null)}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="btn btn-sm" onClick={() => { setEditingMemberId(m.id); setEditingRole(m.role); }}>Edit</button>
+                            <button className="btn btn-sm btn-danger" onClick={() => handleRemoveMember(m.id)}>Remove</button>
+                          </>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
