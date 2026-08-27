@@ -1,0 +1,20 @@
+{
+  "name": "AI Content Automation Platform",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "api",
+      "command": "npm run dev"
+    },
+    {
+      "name": "admin",
+      "command": "npm run admin:dev"
+    }
+  ],
+  "ports": [
+    3000,
+    3001
+  ]
+}
