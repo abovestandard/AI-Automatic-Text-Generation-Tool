@@ -20,6 +20,10 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: '2.1.0', database: 'postgresql' });
 });
 
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', version: '2.1.0', database: 'postgresql' });
+});
+
 app.use('/api/auth', authRouter);
 app.use('/api/websites', websitesRouter);
 app.use('/api/users', usersRouter);

@@ -14,7 +14,8 @@ class AICA_API_Client {
     }
 
     public function test_connection(): array {
-        $health_url = $this->api_url . '/api/health';
+        // Use /api/auth/status — always public (no login required).
+        $health_url = $this->api_url . '/api/auth/status';
         $response = wp_remote_get($health_url, ['timeout' => 15]);
         if (is_wp_error($response)) {
             $message = $response->get_error_message();
@@ -22,7 +23,7 @@ class AICA_API_Client {
                 return [
                     'success' => false,
                     'message' => sprintf(
-                        'Connection timed out reaching %s. Use your Apache CRM URL (not :3001), e.g. http://your-server/AI-automatic-text-Generation-Tool — and ensure WordPress can reach that server on your network.',
+                        'Connection timed out reaching %s. Use your Apache CRM URL (not :3001), e.g. http://your-server/AI-automatic-text-Generation-Tool — and ensure WordPress can reach that server.',
                         $health_url
                     ),
                 ];
@@ -31,7 +32,14 @@ class AICA_API_Client {
         }
         $code = wp_remote_retrieve_response_code($response);
         if ($code !== 200) {
-            return ['success' => false, 'message' => "HTTP $code"];
+            $body = json_decode(wp_remote_retrieve_body($response), true);
+            $detail = is_array($body) && !empty($body['error']) ? $body['error'] : "HTTP $code";
+            return ['success' => false, 'message' => $detail];
+        }
+
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        if (!is_array($body) || !array_key_exists('userCount', $body)) {
+            return ['success' => false, 'message' => 'Unexpected API response. Check the Platform API URL.'];
         }
 
         if ($this->site_api_key === '') {
