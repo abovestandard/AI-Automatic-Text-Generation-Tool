@@ -1,0 +1,110 @@
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { api, Project, Website } from '../api';
+import ModelSelect from '../components/ModelSelect';
+
+export default function ProjectsPage() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [websites, setWebsites] = useState<Website[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini', websiteId: '' });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadData(); }, []);
+
+  async function loadData() {
+    try {
+      const [projectData, websiteData] = await Promise.all([api.getProjects(), api.getWebsites()]);
+      setProjects(projectData);
+      setWebsites(websiteData);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.websiteId) return;
+    await api.createProject(form);
+    setShowForm(false);
+    setForm({ name: '', description: '', wordpressUrl: '', defaultModel: 'gpt-4o-mini', websiteId: '' });
+    loadData();
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm('Delete this project?')) return;
+    await api.deleteProject(id);
+    loadData();
+  }
+
+  if (loading) return <div className="loading">Loading...</div>;
+
+  return (
+    <div>
+      <div className="page-header">
+        <h2>Projects</h2>
+        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
+          {showForm ? 'Cancel' : 'New Project'}
+        </button>
+      </div>
+
+      {showForm && (
+        <form className="card form-card" onSubmit={handleCreate}>
+          <div className="form-group">
+            <label>Website</label>
+            <select value={form.websiteId} onChange={e => setForm({ ...form, websiteId: e.target.value })} required>
+              <option value="">Select website...</option>
+              {websites.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Project Name</label>
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+          </div>
+          <div className="form-group">
+            <label>Description</label>
+            <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>WordPress URL</label>
+            <input value={form.wordpressUrl} onChange={e => setForm({ ...form, wordpressUrl: e.target.value })} placeholder="https://example.com" />
+          </div>
+          <div className="form-group">
+            <label>Default AI Model</label>
+            <ModelSelect value={form.defaultModel} onChange={(v) => setForm({ ...form, defaultModel: v })} />
+          </div>
+          <button type="submit" className="btn btn-primary">Create Project</button>
+        </form>
+      )}
+
+      <div className="grid">
+        {projects.map(p => (
+          <div key={p.id} className="card project-card">
+            <h3>{p.name}</h3>
+            {p.description && <p className="text-muted">{p.description}</p>}
+            <div className="card-meta">
+              <span className="badge">{p.defaultModel}</span>
+              <span>{p.hasOpenaiKey ? 'OpenAI ✓' : 'OpenAI ○'}</span>
+              <span>{p.hasGeminiKey ? 'Gemini ✓' : 'Gemini ○'}</span>
+            </div>
+            <div className="card-actions">
+              <Link to={`/projects/${p.id}`} className="btn btn-sm">Configure</Link>
+              <Link to={`/projects/${p.id}/prompts`} className="btn btn-sm">Prompts</Link>
+              <Link to={`/projects/${p.id}/mappings`} className="btn btn-sm">Mappings</Link>
+              <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p.id)}>Delete</button>
+            </div>
+            <div className="project-id">ID: <code>{p.id}</code></div>
+          </div>
+        ))}
+      </div>
+
+      {projects.length === 0 && !showForm && (
+        <div className="empty-state">
+          <p>No projects yet. Create your first project to get started.</p>
+        </div>
+      )}
+    </div>
+  );
+}

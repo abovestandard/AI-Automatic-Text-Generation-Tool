@@ -1,0 +1,373 @@
+<?php
+if (!defined('ABSPATH')) exit;
+
+class AICA_ACF_Helper {
+
+    public static function is_available(): bool {
+        return function_exists('acf_get_field_groups') && function_exists('acf_get_fields');
+    }
+
+    /**
+     * Get ACF field tree for a post type or taxonomy.
+     */
+    public static function get_field_tree(string $kind, string $slug): array {
+        if (!self::is_available()) {
+            return [];
+        }
+
+        $location = $kind === 'taxonomy'
+            ? ['taxonomy' => $slug]
+            : ['post_type' => $slug];
+
+        $groups = acf_get_field_groups($location);
+        $tree = [];
+
+        foreach ($groups as $group) {
+            $fields = acf_get_fields($group['key']);
+            if ($fields) {
+                $tree[] = [
+                    'group'  => $group['title'],
+                    'key'    => $group['key'],
+                    'fields' => self::parse_fields($fields),
+                ];
+            }
+        }
+
+        return $tree;
+    }
+
+    /**
+     * Flat list of all mappable fields with dot-notation paths.
+     */
+    public static function get_flat_fields(string $kind, string $slug): array {
+        $tree = self::get_field_tree($kind, $slug);
+        $flat = [];
+        foreach ($tree as $group) {
+            self::flatten_fields($group['fields'], $flat);
+        }
+        return $flat;
+    }
+
+    private static function parse_fields(array $fields, string $prefix = ''): array {
+        $result = [];
+        foreach ($fields as $field) {
+            $type = $field['type'] ?? 'text';
+
+            // Tab/accordion are layout wrappers — recurse without adding to path
+            if (in_array($type, ['tab', 'accordion'], true) && !empty($field['sub_fields'])) {
+                $result = array_merge($result, self::parse_fields($field['sub_fields'], $prefix));
+                continue;
+            }
+
+            // Clone field — inline cloned sub-fields
+            if ($type === 'clone' && !empty($field['sub_fields'])) {
+                $clone_prefix = !empty($field['prefix_name']) && !empty($field['name'])
+                    ? ($prefix ? "{$prefix}.{$field['name']}" : $field['name'])
+                    : $prefix;
+                $result = array_merge($result, self::parse_fields($field['sub_fields'], $clone_prefix));
+                continue;
+            }
+
+            if (empty($field['name'])) {
+                continue;
+            }
+
+            $path = $prefix ? "{$prefix}.{$field['name']}" : $field['name'];
+            $entry = [
+                'name'  => $field['name'],
+                'label' => $field['label'] ?? $field['name'],
+                'type'  => $type,
+                'path'  => $path,
+            ];
+
+            if (in_array($type, ['group', 'repeater', 'flexible_content'], true) && !empty($field['sub_fields'])) {
+                $entry['children'] = self::parse_fields($field['sub_fields'], $path);
+                if ($type === 'repeater') {
+                    $entry['isRepeater'] = true;
+                }
+            }
+
+            $result[] = $entry;
+        }
+        return $result;
+    }
+
+    private static function flatten_fields(array $fields, array &$flat, int $depth = 0): void {
+        foreach ($fields as $field) {
+            if (!in_array($field['type'], ['group', 'repeater', 'flexible_content', 'tab', 'accordion'], true)) {
+                $flat[] = [
+                    'path'  => $field['path'],
+                    'label' => $field['label'],
+                    'type'  => $field['type'],
+                    'depth' => $depth,
+                ];
+            }
+            if (!empty($field['children'])) {
+                self::flatten_fields($field['children'], $flat, $depth + 1);
+            }
+            if (!empty($field['isRepeater'])) {
+                $flat[] = [
+                    'path'       => $field['path'],
+                    'label'      => $field['label'] . ' (Repeater – use JSON array)',
+                    'type'       => 'repeater',
+                    'depth'      => $depth,
+                    'isRepeater' => true,
+                ];
+            }
+        }
+    }
+
+    /**
+     * Flatten existing ACF values for prompt variables using dot notation.
+     */
+    public static function flatten_values(array $fields, string $prefix = ''): array {
+        $flat = [];
+        foreach ($fields as $key => $value) {
+            $path = $prefix ? "{$prefix}.{$key}" : $key;
+            if (is_array($value) && self::is_assoc_array($value)) {
+                $flat = array_merge($flat, self::flatten_values($value, $path));
+            } elseif (is_array($value) && !empty($value) && is_array($value[0] ?? null)) {
+                $flat[$path] = wp_json_encode($value);
+            } elseif (is_string($value) || is_numeric($value)) {
+                $flat[$path] = (string) $value;
+                $flat[str_replace('.', '_', $path)] = (string) $value;
+            }
+        }
+        return $flat;
+    }
+
+    /**
+     * Save a value to an ACF field using dot-notation path.
+     * Supports nested groups, repeaters, text, and wysiwyg fields.
+     */
+    public static function save_field_path(string $path, $value, $object_id): bool {
+        if (!function_exists('update_field')) {
+            return false;
+        }
+
+        $parsed = self::normalize_ai_value(self::parse_value($value));
+        $parsed = AICA_ACF_Schema_Builder::strip_excluded_keys($parsed);
+        $parts  = explode('.', $path);
+
+        if (count($parts) === 1) {
+            $existing = get_field($parts[0], $object_id);
+            if (is_array($existing) && is_array($parsed)) {
+                $parsed = self::preserve_excluded_fields($existing, $parsed);
+            }
+            return self::acf_update_and_verify($parts[0], $parsed, $object_id, $path, $parsed);
+        }
+
+        $root   = $parts[0];
+        $nested = self::build_nested_value(array_slice($parts, 1), $parsed);
+
+        $existing = get_field($root, $object_id);
+        if (is_array($existing) && is_array($nested)) {
+            $nested = self::deep_merge_nested($existing, $nested);
+            $nested = self::preserve_excluded_fields($existing, $nested);
+        }
+
+        return self::acf_update_and_verify($root, $nested, $object_id, $path, $parsed);
+    }
+
+    /**
+     * Update an ACF field and verify success.
+     * update_field() often returns false even when data was saved (ACF quirk).
+     */
+    private static function acf_update_and_verify(string $field_name, $value, $object_id, string $verify_path, $expected): bool {
+        update_field($field_name, $value, $object_id);
+
+        $saved = self::get_value_at_path($verify_path, $object_id);
+        return self::value_was_saved($saved, $expected);
+    }
+
+    public static function get_value_at_path(string $path, $object_id) {
+        $parts = explode('.', $path);
+        $root  = get_field($parts[0], $object_id);
+        if (count($parts) === 1) {
+            return $root;
+        }
+        return self::get_nested_value($root, array_slice($parts, 1));
+    }
+
+    public static function get_nested_value($data, array $parts) {
+        foreach ($parts as $part) {
+            if (!is_array($data) || !array_key_exists($part, $data)) {
+                return null;
+            }
+            $data = $data[$part];
+        }
+        return $data;
+    }
+
+    /**
+     * Check whether a value was persisted (handles ACF false negatives).
+     */
+    public static function verify_saved($saved, $expected): bool {
+        return self::value_was_saved($saved, $expected);
+    }
+
+    private static function value_was_saved($saved, $expected): bool {
+        if ($expected === null || $expected === '') {
+            return false;
+        }
+
+        if (is_array($expected)) {
+            if (!is_array($saved) || empty($saved)) {
+                return false;
+            }
+            if (self::is_list_array($expected)) {
+                return count($saved) >= count($expected);
+            }
+            return true;
+        }
+
+        if (is_string($expected) && is_string($saved)) {
+            return trim($saved) !== '';
+        }
+
+        return !empty($saved);
+    }
+
+    /**
+     * Merge nested ACF data: replace repeater rows entirely, merge group sub-fields.
+     */
+    private static function deep_merge_nested(array $base, array $overlay): array {
+        foreach ($overlay as $key => $value) {
+            if (is_array($value) && self::is_list_array($value)) {
+                $base[$key] = self::normalize_repeater_rows($value);
+            } elseif (is_array($value) && is_array($base[$key] ?? null) && self::is_assoc_array($value)) {
+                $base[$key] = self::deep_merge_nested($base[$key], $value);
+            } else {
+                $base[$key] = $value;
+            }
+        }
+        return $base;
+    }
+
+    /**
+     * Normalize repeater row values (decode JSON strings, merge nested repeaters).
+     */
+    private static function normalize_repeater_rows(array $rows): array {
+        $normalized = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $item = [];
+            foreach ($row as $key => $val) {
+                $val = self::parse_value($val);
+                if (is_array($val) && self::is_list_array($val)) {
+                    $item[$key] = self::normalize_repeater_rows($val);
+                } else {
+                    $item[$key] = $val;
+                }
+            }
+            $normalized[] = $item;
+        }
+        return $normalized;
+    }
+
+    private static function is_list_array(array $arr): bool {
+        if ($arr === []) {
+            return true;
+        }
+        return array_keys($arr) === range(0, count($arr) - 1);
+    }
+
+    private static function build_nested_value(array $parts, $value): array {
+        if (count($parts) === 1) {
+            return [$parts[0] => $value];
+        }
+        return [$parts[0] => self::build_nested_value(array_slice($parts, 1), $value)];
+    }
+
+    public static function parse_value($value) {
+        if (!is_string($value)) {
+            return $value;
+        }
+        $trimmed = trim($value);
+        if ($trimmed !== '' && ($trimmed[0] === '[' || $trimmed[0] === '{')) {
+            $decoded = json_decode($trimmed, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                return $decoded;
+            }
+        }
+        return $value;
+    }
+
+    public static function normalize_ai_value($value) {
+        if (is_string($value)) {
+            $parsed = self::parse_value($value);
+            return $parsed === $value ? $value : self::normalize_ai_value($parsed);
+        }
+
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        if (self::is_ai_type_wrapper($value)) {
+            return (string) $value['_type'];
+        }
+
+        if (self::is_list_array($value)) {
+            return array_map([self::class, 'normalize_ai_value'], $value);
+        }
+
+        $normalized = [];
+        foreach ($value as $key => $item) {
+            $normalized[$key] = self::normalize_ai_value($item);
+        }
+        return $normalized;
+    }
+
+    /**
+     * Keep excluded field values from existing ACF data when AI output omits them.
+     */
+    public static function preserve_excluded_fields($existing, $incoming) {
+        if (!is_array($existing) || !is_array($incoming)) {
+            return $incoming;
+        }
+
+        if (self::is_list_array($incoming)) {
+            $merged = [];
+            foreach ($incoming as $index => $row) {
+                $existing_row = is_array($existing[$index] ?? null) ? $existing[$index] : [];
+                $merged[] = is_array($row)
+                    ? self::preserve_excluded_fields($existing_row, $row)
+                    : $row;
+            }
+            return $merged;
+        }
+
+        $result = $incoming;
+        foreach ($existing as $key => $value) {
+            $key_name = (string) $key;
+            if (!AICA_ACF_Schema_Builder::is_excluded($key_name, $key_name)) {
+                if (is_array($value) && is_array($result[$key] ?? null)) {
+                    $result[$key] = self::preserve_excluded_fields($value, $result[$key]);
+                }
+                continue;
+            }
+
+            $result[$key] = $value;
+        }
+
+        return $result;
+    }
+
+    private static function is_ai_type_wrapper(array $value): bool {
+        if (count($value) !== 1 || !array_key_exists('_type', $value) || !is_string($value['_type'])) {
+            return false;
+        }
+
+        $marker = $value['_type'];
+        return !in_array($marker, ['text', 'html', 'group', 'repeater', 'string'], true);
+    }
+
+    private static function is_assoc_array(array $arr): bool {
+        if ($arr === []) {
+            return false;
+        }
+        return array_keys($arr) !== range(0, count($arr) - 1);
+    }
+}

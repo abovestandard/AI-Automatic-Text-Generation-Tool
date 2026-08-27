@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Website {
+  id               String   @id @default(uuid())
+  name             String
+  domain           String?
+  slug             String   @unique
+  defaultProjectId String?  @map("default_project_id")
+  settings         Json     @default("{}")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  projects    Project[]
+  memberships Membership[]
+  apiKeys     SiteApiKey[]
+
+  @@map("websites")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  isSuperAdmin Boolean  @default(false) @map("is_super_admin")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  memberships Membership[]
+
+  @@map("users")
+}
+
+model Membership {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  websiteId String   @map("website_id")
+  role      String   @default("website_admin")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, websiteId])
+  @@map("memberships")
+}
+
+model SiteApiKey {
+  id         String    @id @default(uuid())
+  websiteId  String    @map("website_id")
+  keyHash    String    @unique @map("key_hash")
+  label      String?
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId])
+  @@map("site_api_keys")
+}
+
+model Project {
+  id              String   @id @default(uuid())
+  websiteId       String?  @map("website_id")
+  name            String
+  description     String?
+  wordpressUrl    String?  @map("wordpress_url")
+  wordpressApiKey String?  @map("wordpress_api_key")
+  openaiApiKey    String?  @map("openai_api_key")
+  geminiApiKey    String?  @map("gemini_api_key")
+  defaultModel    String   @default("gemini-3.6-flash") @map("default_model")
+  defaultLanguage String   @default("en") @map("default_language")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  website           Website?           @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+  prompts           Prompt[]
+  fieldMappings     FieldMapping[]
+  generationResults GenerationResult[]
+  bulkJobs          BulkJob[]
+
+  @@index([websiteId])
+  @@map("projects")
+}
+
+model Prompt {
+  id                 String   @id @default(uuid())
+  projectId          String   @map("project_id")
+  name               String
+  description        String?
+  systemPrompt       String   @map("system_prompt")
+  userPromptTemplate String   @map("user_prompt_template")
+  outputFields       Json     @default("[]") @map("output_fields")
+  model              String?
+  supportsVision     Boolean  @default(false) @map("supports_vision")
+  responseFormat     String   @default("json") @map("response_format")
+  variables          Json     @default("[]")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fieldMappings     FieldMapping[]
+  generationResults GenerationResult[]
+  bulkJobs          BulkJob[]
+
+  @@index([projectId])
+  @@map("prompts")
+}
+
+model FieldMapping {
+  id             String  @id @default(uuid())
+  projectId      String  @map("project_id")
+  promptId       String  @map("prompt_id")
+  aiOutputKey    String  @map("ai_output_key")
+  targetType     String  @map("target_type")
+  targetField    String  @map("target_field")
+  targetSelector String? @map("target_selector")
+  contentType    String? @map("content_type")
+  termTaxonomy   String? @map("term_taxonomy")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  prompt  Prompt  @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([promptId])
+  @@map("field_mappings")
+}
+
+model GenerationResult {
+  id               String   @id @default(uuid())
+  projectId        String   @map("project_id")
+  promptId         String   @map("prompt_id")
+  itemId           String   @map("item_id")
+  itemType         String   @map("item_type")
+  status           String
+  generatedContent Json?    @map("generated_content")
+  mappedFields     Json?    @map("mapped_fields")
+  rawResponse      String?  @map("raw_response")
+  error            String?
+  tokensUsed       Int?     @map("tokens_used")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  prompt  Prompt  @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("generation_results")
+}
+
+model BulkJob {
+  id          String    @id @default(uuid())
+  projectId   String    @map("project_id")
+  promptId    String    @map("prompt_id")
+  name        String
+  status      String    @default("queued")
+  applyMode   String    @default("preview") @map("apply_mode")
+  items       Json      @default("[]")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  prompt  Prompt  @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("bulk_jobs")
+}

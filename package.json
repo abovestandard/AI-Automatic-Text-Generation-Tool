@@ -1,0 +1,24 @@
+{
+  "name": "ai-content-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reusable AI-powered content generation platform for WordPress and beyond",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@ai-content/api",
+    "build": "npm run build --workspace=@ai-content/core && npm run build --workspace=@ai-content/api && npm run build --workspace=@ai-content/admin",
+    "start": "npm run start --workspace=@ai-content/api",
+    "admin:dev": "npm run dev --workspace=@ai-content/admin",
+    "admin:build": "npm run build --workspace=@ai-content/admin",
+    "db:migrate": "npm run db:migrate --workspace=@ai-content/api",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace=@ai-content/api",
+    "db:studio": "npm run db:studio --workspace=@ai-content/api",
+    "db:seed": "npm run db:seed --workspace=@ai-content/api",
+    "postinstall": "npm run db:generate --workspace=@ai-content/api"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
