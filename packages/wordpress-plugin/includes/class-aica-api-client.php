@@ -14,9 +14,20 @@ class AICA_API_Client {
     }
 
     public function test_connection(): array {
-        $response = wp_remote_get($this->api_url . '/health', ['timeout' => 10]);
+        $health_url = $this->api_url . '/api/health';
+        $response = wp_remote_get($health_url, ['timeout' => 15]);
         if (is_wp_error($response)) {
-            return ['success' => false, 'message' => $response->get_error_message()];
+            $message = $response->get_error_message();
+            if (strpos($message, 'cURL error 28') !== false) {
+                return [
+                    'success' => false,
+                    'message' => sprintf(
+                        'Connection timed out reaching %s. Use your Apache CRM URL (not :3001), e.g. http://your-server/AI-automatic-text-Generation-Tool — and ensure WordPress can reach that server on your network.',
+                        $health_url
+                    ),
+                ];
+            }
+            return ['success' => false, 'message' => $message];
         }
         $code = wp_remote_retrieve_response_code($response);
         if ($code !== 200) {

@@ -22,6 +22,10 @@ import {
 
 export const apiRouter = Router();
 
+apiRouter.get('/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', version: '2.1.0', database: 'postgresql' });
+});
+
 apiRouter.get('/models', (_req: Request, res: Response) => {
   res.json(AI_MODELS);
 });

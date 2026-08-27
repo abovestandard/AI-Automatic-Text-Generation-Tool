@@ -68,7 +68,9 @@ class AICA_Settings {
                             <input type="url" id="api_url" name="<?php echo esc_attr(self::OPTION_KEY); ?>[api_url]"
                                    value="<?php echo esc_attr($settings['api_url'] ?? ''); ?>" class="regular-text"
                                    placeholder="http://localhost:3001" />
-                            <p class="description"><?php esc_html_e('URL of the AI Content Automation platform API.', 'ai-content-automation'); ?></p>
+                            <p class="description">
+                                <?php esc_html_e('Base URL of the CRM platform. Use your Apache/XAMPP URL if the CRM is not on port 3001, e.g. http://192.168.1.11/AI-automatic-text-Generation-Tool', 'ai-content-automation'); ?>
+                            </p>
                         </td>
                     </tr>
                     <tr>
